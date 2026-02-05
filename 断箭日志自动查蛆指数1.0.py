@@ -19,7 +19,7 @@ from datetime import datetime
 
 # ================= 配置区域 =================
 # --- 核心版本与API配置 ---
-CURRENT_VERSION = "v1.0.1" # [修改] 版本号升级
+CURRENT_VERSION = "v1.0.2" # [修改] 版本号升级
 GITHUB_USER = "Zawinzala"
 GITHUB_REPO = "brokenarrow-log-maggot"
 GITHUB_BRANCH = "main"
@@ -560,14 +560,23 @@ class LogMonitorApp:
                 if not latest_version.startswith("v"):
                     return
                 
+                # 对比版本
                 if version.parse(latest_version) > version.parse(CURRENT_VERSION):
                     self.log_message(f"发现新版本: {latest_version}", "WARNING")
-                    # 有更新：变绿，变文案
-                    self.btn_update.text = f"更新: {latest_version}"
+                    
+                    # === 修复修改：强制更新按钮样式和文字 ===
+                    self.btn_update.text = f"更新: {latest_version}" # 尝试修改文本属性
+                    # 双重保险：如果 text 属性失效，设置 content 会强制重绘文字
+                    self.btn_update.content = ft.Row(
+                        [ft.Icon(ft.Icons.CLOUD_DOWNLOAD), ft.Text(f"更新: {latest_version}")],
+                        alignment=ft.MainAxisAlignment.CENTER
+                    )
+                    
                     self.btn_update.bgcolor = ft.Colors.GREEN_600
-                    self.btn_update.icon = ft.Icons.CLOUD_DOWNLOAD
                     self.btn_update.data = release_page # 存储下载链接
-                    self.btn_update.update()
+                    self.btn_update.update() # 提交更新
+                    # =======================================
+
                     self.show_snack(f"发现新版本 {latest_version}！请点击上方绿色按钮下载。")
                 else:
                     self.log_message(f"当前 {CURRENT_VERSION} 已是最新", "SYSTEM")
@@ -695,9 +704,9 @@ class LogMonitorApp:
         self.btn_save = ft.FilledButton("保存", icon=ft.Icons.SAVE, on_click=self.on_save_path)
         
         path_hint = ft.Text(
-            "提示：Broken Arrow multiplayer 日志默认位于 Steam 安装目录下 \\steamapps\\common\\broken_arrow\\GameLogs\n"
-            "仅 multiplayer 模式会生成 Gamelog__*.log 文件，请确保路径正确",
-            size=11, color=ft.Colors.AMBER_300, italic=True
+            "提示：Broken Arrow 日志默认位于 Steam 安装目录下 \\steamapps\\common\\broken_arrow\\GameLogs\n"
+            "文件夹内会生成 Gamelog__*.log 文件，请确保路径正确",
+            size=11, color=ft.Colors.AMBER_300
         )
         
         about_btn = ft.IconButton(icon=ft.Icons.INFO, tooltip="关于/说明", on_click=self.show_about_dialog)
