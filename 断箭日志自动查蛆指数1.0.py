@@ -19,7 +19,7 @@ from datetime import datetime
 
 # ================= 配置区域 =================
 # --- 核心版本与API配置 ---
-CURRENT_VERSION = "v1.0.0" # 当前版本
+CURRENT_VERSION = "v1.0.1" # [修改] 版本号升级
 GITHUB_USER = "Zawinzala"
 GITHUB_REPO = "brokenarrow-log-maggot"
 GITHUB_BRANCH = "main"
@@ -759,14 +759,17 @@ class LogMonitorApp:
         self.txt_status = ft.Text("初始化...", color=ft.Colors.CYAN)
         self.txt_file = ft.Text("", size=12, color=ft.Colors.GREY_500)
         
+        # [修改] 日志区域配置，确保自动滚动
         self.log_container = ft.ListView(expand=True, auto_scroll=True, spacing=2)
         
+        # [修改] 关键修复：给容器设置固定高度，使其出现内部滚轮
         self.log_scroll = ft.Container(
             content=self.log_container,
             bgcolor=ft.Colors.BLACK,
             padding=10,
             border_radius=8,
-            expand=True
+            height=300, # <--- 限制高度，使ListView能够处理滚动逻辑
+            # expand=True <--- 移除 expand，避免在 ExpansionTile 中无限撑开
         )
         
         self.exp_logs = ft.ExpansionTile(
