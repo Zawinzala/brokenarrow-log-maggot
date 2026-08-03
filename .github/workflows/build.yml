@@ -6,6 +6,9 @@ on:
       - 'v*'            # 推送 v3.0.0 这类标签时自动打包并发布
   workflow_dispatch: {} # 也可在 GitHub 页面手动点 Run workflow
 
+permissions:
+  contents: write   # 创建 Release 需要；只有打包产物则用默认即可
+
 jobs:
   build:
     runs-on: windows-latest
