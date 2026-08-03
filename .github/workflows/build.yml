@@ -7,23 +7,24 @@ on:
   workflow_dispatch: {} # 也可在 GitHub 页面手动点 Run workflow
 
 permissions:
-  contents: write   # 创建 Release 需要；只有打包产物则用默认即可
+  contents: write   # 创建 Release 需要
 
 jobs:
   build:
     runs-on: windows-latest
+    timeout-minutes: 30
     steps:
       - name: 检出代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
-      - name: 安装 Node.js
-        uses: actions/setup-node@v4
+      - name: 安装 Node.js 22（LTS）
+        uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - name: 安装依赖
-        run: npm install
+        run: npm install --no-audit --no-fund
 
       - name: 打包（nsis 安装版 + portable 便携版）
         run: npm run dist
@@ -33,6 +34,7 @@ jobs:
         with:
           name: dist-windows
           path: dist/
+          if-no-files-found: error
 
       - name: 创建 GitHub Release（仅打标签时）
         if: startsWith(github.ref, 'refs/tags/')
@@ -40,3 +42,4 @@ jobs:
         with:
           files: |
             dist/*.exe
+          fail_on_unmatched_files: false

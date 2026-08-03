@@ -6,8 +6,8 @@
   "scripts": {
     "start": "electron .",
     "smoke": "electron smoke.js",
-    "pack": "node scripts/prepare-icon.js && electron-builder --dir",
-    "dist": "node scripts/prepare-icon.js && electron-builder --win"
+    "pack": "node scripts/prepare-icon.js && electron-builder --dir --publish never",
+    "dist": "node scripts/prepare-icon.js && electron-builder --win --publish never"
   },
   "author": "Zola",
   "license": "MIT",
