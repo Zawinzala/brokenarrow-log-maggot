@@ -1,4 +1,4 @@
-# 断箭蛆工具 byZola（Electron 版）
+﻿# 断箭蛆工具 byZola（Electron 版）
 
 基于游戏官方 GameLogs 日志 + [BATrace](https://app.batrace.top/) 公开数据查询的本地辅助工具。
 替代旧的「断箭蛆工具」（旧工具因 BATrace API 改版已失效，本版本已适配新版接口）。
