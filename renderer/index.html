@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:; connect-src 'self'" />
+  <title>断箭蛆工具 byZola</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header id="topbar">
+    <div class="brand">
+      <span class="logo">🐛</span>
+      <span>断箭蛆工具 byZola</span>
+      <span id="ver" class="dim">v3.0.0</span>
+    </div>
+    <div class="status" id="statusBar">
+      <span id="listenDot" class="dot off"></span>
+      <span id="statusText">未监听</span>
+      <span id="fileText" class="dim"></span>
+      <span id="budgetText" class="dim" title="本机 24 小时内实际请求 BATrace 的次数（缓存命中不计）"></span>
+      <span id="onlineText" class="dim" title="统计服务返回的当前在线用户数（可在设置里关闭）"></span>
+    </div>
+    <div class="actions">
+      <button id="btnSettings">设置</button>
+    </div>
+  </header>
+
+  <main>
+    <div id="updateBanner" class="update-banner hidden">
+      <span id="updateText"></span>
+      <button id="btnUpdateOpen" class="ghost">查看</button>
+      <button id="btnUpdateClose" class="ghost">×</button>
+    </div>
+
+    <!-- 当前对局 / 房间粗查 -->
+    <section class="card" id="currentCard">
+      <div class="card-head">
+        <h2 id="currentCardTitle">当前房间 / 当前对局</h2>
+        <span id="matchMeta" class="dim">等待日志…</span>
+      </div>
+      <div id="matchInfo" class="match-info"></div>
+      <div id="teamGrid" class="team-grid"></div>
+      <div class="query-row">
+        <div id="queryStatus" class="query-status dim"></div>
+        <button id="btnReQuery" class="ghost" title="手动重新触发当前对局/房间粗查">🔄 重新粗查</button>
+      </div>
+      <div class="delay-note dim">⚠️ 粗查结果来自 BATrace 历史数据，存在数天延迟，并非实时对战数据。</div>
+    </section>
+
+    <!-- 卡组工具 -->
+    <section class="card">
+      <div class="card-head">
+        <h2>卡组工具</h2>
+        <span id="deckPaths" class="dim"></span>
+      </div>
+      <div class="deck-wrap">
+        <div class="deck-panel">
+          <h3>前线卡组 (.dek)</h3>
+          <select id="deckFront" multiple size="10"></select>
+          <div class="deck-actions"><button id="btnOpenFront" class="ghost">📂 打开目录</button></div>
+        </div>
+        <div class="deck-mid">
+          <button id="btnDeckRefresh">刷新列表</button>
+          <button id="btnDeckBackup">备份选中 →</button>
+          <button id="btnDeckBackupAll">备份全部 →</button>
+          <button id="btnDeckDeploy">← 部署</button>
+          <button id="btnDeckDelFront" class="danger">删除左选</button>
+          <button id="btnDeckDelBack" class="danger">删除右选</button>
+        </div>
+        <div class="deck-panel">
+          <h3>后勤仓库 (.zip)</h3>
+          <select id="deckBack" multiple size="10"></select>
+          <div class="deck-actions"><button id="btnOpenBack" class="ghost">📂 打开目录</button></div>
+        </div>
+      </div>
+      <div id="backupRow" class="search-row hidden">
+        <input id="backupName" type="text" placeholder="备份包名称（默认带时间戳）" />
+        <button id="btnBackupOk">确认备份</button>
+        <button id="btnBackupCancel" class="ghost">取消</button>
+      </div>
+      <div id="deckMsg" class="query-status dim"></div>
+    </section>
+
+    <!-- 玩家查询：粗查 + 蛆查 -->
+    <section class="card">
+      <div class="card-head">
+        <h2>玩家查蛆指数</h2>
+        <span id="maggotCalls" class="dim"></span>
+      </div>
+      <div class="search-row">
+        <input id="searchInput" type="text" placeholder="输入玩家名或 ID，回车搜索" />
+        <button id="btnSearch">搜索</button>
+        <button id="btnMaggot" class="accent">🐛 查蛆指数</button>
+      </div>
+      <div class="hint dim">搜索 → 点结果看粗查预览（1 次调用，数据有数天延迟）→ 点「🐛 查蛆指数」看蛆指数（冷查约 13 次调用，24 小时缓存后仅 1 次）。</div>
+      <div id="searchResults" class="search-results"></div>
+      <div id="reportArea"></div>
+      <div id="maggotArea"></div>
+    </section>
+
+    <!-- 对局档案 -->
+    <section class="card">
+      <div class="card-head">
+        <h2>对局档案</h2>
+        <button id="btnClearArchive" class="ghost">清空</button>
+      </div>
+      <div id="archiveList" class="archive-list"></div>
+    </section>
+
+    <!-- 关于 -->
+    <section class="card" id="aboutCard">
+      <div class="card-head">
+        <h2>关于</h2>
+        <span id="aboutVer" class="dim"></span>
+      </div>
+      <div class="about-body">
+        <p><b>软件原理</b>：本工具只读取游戏官方公开的日志文件（GameLogs）与查询网站的公开接口，不读写游戏内存、不注入进程、不修改游戏文件，不影响反作弊，仅作赛后复盘参考。</p>
+        <p><b>数据致谢</b>：玩家数据由 <a id="linkBatrace" href="#" class="link">BATrace 查询站</a> 提供；蛆指数算法与 <a id="linkMaggotSite" href="#" class="link">断箭蛆指数网站</a> 保持同步。</p>
+        <div id="updateInfo" class="update-info"></div>
+      </div>
+    </section>
+  </main>
+
+  <!-- 确认弹窗 -->
+  <div id="confirmModal" class="modal hidden">
+    <div class="modal-box small">
+      <h3 id="confirmTitle">确认</h3>
+      <p id="confirmText"></p>
+      <div class="modal-actions">
+        <button id="btnConfirmYes">确定</button>
+        <button id="btnConfirmNo" class="ghost">取消</button>
+      </div>
+    </div>
+  </div>
+  <!-- 设置弹窗 -->
+  <div id="settingsModal" class="modal hidden">
+    <div class="modal-box">
+      <h3>设置</h3>
+      <label>游戏日志目录（GameLogs）</label>
+      <div class="search-row">
+        <input id="setLogDir" type="text" placeholder="选择断箭的 GameLogs 目录" />
+        <button id="btnBrowse">浏览…</button>
+      </div>
+      <div class="row">
+        <button id="btnDetect" class="ghost">自动检测 Steam 目录</button>
+        <span id="dirHint" class="dim"></span>
+      </div>
+      <label>轮询间隔（毫秒）</label>
+      <input id="setPoll" type="number" min="500" max="10000" step="100" />
+      <label>API 请求间隔（毫秒，越小越快但容易被限）</label>
+      <input id="setDelay" type="number" min="100" max="3000" step="50" />
+      <label class="check"><input id="setAuto" type="checkbox" /> 检测到对局后自动粗查玩家</label>
+      <label class="check"><input id="setHeartbeat" type="checkbox" /> 加入使用统计（只上报匿名 ID + 版本号，用于统计在线人数，可随时关闭）</label>
+      <label>统计服务地址（一般无需修改）</label>
+      <div class="search-row">
+        <input id="setHeartbeatUrl" type="text" placeholder="https://heartbeat-service.zawin-zala.workers.dev" />
+        <button id="btnHeartbeatTest" class="ghost">测试心跳</button>
+      </div>
+      <div id="heartbeatTest" class="dim"></div>
+      <div class="modal-actions">
+        <button id="btnSave">保存</button>
+        <button id="btnCancel" class="ghost">取消</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

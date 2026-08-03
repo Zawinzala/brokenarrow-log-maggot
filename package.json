@@ -1,0 +1,56 @@
+{
+  "name": "broken-arrow-log-assistant",
+  "version": "3.0.0",
+  "description": "断箭蛆工具 byZola - 基于 GameLogs 日志监听与 BATrace 数据查询的本地辅助工具",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "smoke": "electron smoke.js",
+    "pack": "node scripts/prepare-icon.js && electron-builder --dir",
+    "dist": "node scripts/prepare-icon.js && electron-builder --win"
+  },
+  "author": "Zola",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^31.7.7",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.zola.brokenarrow.maggot",
+    "productName": "断箭蛆工具 byZola",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer/**",
+      "src/**",
+      "package.json",
+      "build/icon.png"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "断箭蛆工具 byZola"
+    }
+  }
+}

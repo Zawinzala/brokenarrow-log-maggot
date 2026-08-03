@@ -1,0 +1,9 @@
+# Cloudflare Workers 部署配置（心跳统计服务）
+# 部署前：在 Cloudflare 控制台创建一个 KV 命名空间，把 ID 填到下面。
+name = "broken-arrow-heartbeat"
+main = "worker.js"
+compatibility_date = "2025-01-01"
+
+[[kv_namespaces]]
+binding = "STATS_KV"
+id = "把你的KV命名空间ID填到这里"

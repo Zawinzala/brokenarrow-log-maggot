@@ -1,0 +1,133 @@
+// ================= 配置管理 =================
+// 负责读写用户设置（日志目录、轮询间隔、API 限流间隔、缓存时长等）
+const fs = require('fs');
+const path = require('path');
+
+const DEFAULTS = {
+  // 游戏日志目录（用户可自行设置，空字符串 = 未设置）
+  logDir: '',
+  // 监听轮询间隔（毫秒）
+  pollMs: 1500,
+  // batrace 请求最小间隔（毫秒），避免请求过快
+  apiDelayMs: 350,
+  // 是否在检测到对局后自动查询所有玩家
+  autoQueryCurrentMatch: true,
+  // 24 小时 API 调用配额上限（超过后当天不再请求）
+  apiDailyLimit: 120,
+  // 心跳统计（匿名 ID + 版本号；作者自建服务器，可在设置里关闭）
+  heartbeatEnabled: true,
+  heartbeatUrl: 'https://heartbeat-service.zawin-zala.workers.dev',
+  // 玩家报告使用的近期对局页数（每页 5 局）
+  reportMatchPages: 4,
+  // 最爱单位统计使用的最新对局数
+  favUnitMatchCount: 5,
+  // 缓存时长（毫秒）
+  cacheTtl: {
+    info: 6 * 3600 * 1000,      // 玩家信息 6 小时
+    matches: 24 * 3600 * 1000,  // 对局数据 24 小时
+    units: 7 * 24 * 3600 * 1000 // 单位库 7 天
+  }
+};
+
+// 常见默认 Steam 安装路径（用于“自动检测”）
+const COMMON_STEAM_ROOTS = [
+  'C:\\Program Files (x86)\\Steam',
+  'C:\\Program Files\\Steam',
+  'D:\\Steam',
+  'E:\\Steam',
+  'F:\\Steam'
+];
+
+// 从 steam 库配置文件中读取所有库路径
+function readSteamLibraryPaths(steamRoot) {
+  const vdf = path.join(steamRoot, 'steamapps', 'libraryfolders.vdf');
+  try {
+    const text = fs.readFileSync(vdf, 'utf8');
+    const paths = [];
+    const re = /"path"\s*"([^"]+)"/g;
+    let m;
+    while ((m = re.exec(text)) !== null) {
+      paths.push(m[1].replace(/\\\\/g, '\\'));
+    }
+    return paths;
+  } catch (e) {
+    return [];
+  }
+}
+
+// 自动探测断箭的 GameLogs 目录
+function detectSteamLogDir() {
+  const candidates = [];
+  const roots = new Set();
+  for (const r of COMMON_STEAM_ROOTS) {
+    if (fs.existsSync(r)) roots.add(r);
+  }
+  // 顺带把注册表里的 Steam 路径也找出来（若存在）
+  for (const root of [...roots]) {
+    for (const lib of readSteamLibraryPaths(root)) {
+      roots.add(lib);
+    }
+  }
+  for (const root of roots) {
+    candidates.push(path.join(root, 'steamapps', 'common', 'broken_arrow', 'GameLogs'));
+  }
+  for (const c of candidates) {
+    if (fs.existsSync(c)) return c;
+  }
+  return '';
+}
+
+class Config {
+  constructor(userDataPath) {
+    this.file = path.join(userDataPath, 'settings.json');
+    this.data = { ...DEFAULTS };
+    this.load();
+  }
+
+  load() {
+    try {
+      if (fs.existsSync(this.file)) {
+        const raw = JSON.parse(fs.readFileSync(this.file, 'utf8'));
+        this.data = { ...DEFAULTS, ...raw, cacheTtl: { ...DEFAULTS.cacheTtl, ...(raw.cacheTtl || {}) } };
+      }
+    } catch (e) {
+      // 配置损坏时回退默认值
+    }
+  }
+
+  save() {
+    try {
+      fs.mkdirSync(path.dirname(this.file), { recursive: true });
+      fs.writeFileSync(this.file, JSON.stringify(this.data, null, 2), 'utf8');
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  get() {
+    return { ...this.data };
+  }
+
+  set(patch) {
+    this.data = { ...this.data, ...patch };
+    this.save();
+    return this.get();
+  }
+
+  // 校验目录是否包含 Gamelog 文件
+  validateLogDir(dir) {
+    try {
+      if (!dir || !fs.existsSync(dir)) return { ok: false, reason: '目录不存在' };
+      const st = fs.statSync(dir);
+      if (!st.isDirectory()) return { ok: false, reason: '不是目录' };
+      const files = fs.readdirSync(dir);
+      const logFiles = files.filter((f) => /\.(log|txt)$/i.test(f));
+      return { ok: true, files: logFiles.length, sample: logFiles.slice(0, 3) };
+    } catch (e) {
+      return { ok: false, reason: String(e && e.message || e) };
+    }
+  }
+}
+
+module.exports = { Config, detectSteamLogDir, DEFAULTS };

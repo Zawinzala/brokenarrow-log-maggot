@@ -1,0 +1,21 @@
+# 依赖与构建产物
+node_modules/
+dist/
+.smoke-data/
+
+# 本地开发临时文件（_ 开头的脚本/数据）
+/_*.js
+/_*.txt
+/_*.json
+
+# 游戏日志样本
+/Gamelog__*.log
+
+# 打包图标（由 logo.png 自动生成）
+build/icon.png
+
+# 系统/编辑器
+Thumbs.db
+Desktop.ini
+.DS_Store
+.vscode/
