@@ -203,8 +203,8 @@ async function queryCurrentMatch() {
   }
   // 保险：单局最多查询 20 人（正常 10v10 只会查 10 人，机器人/观战/重复都跳过）
   const capped = players.slice(0, 20);
-  const skipped = (cur.players || []).length - capped.length;
-  send('match:querying', { fid: cur.fid, players: capped, skipped });
+  const skipped = ((cur && cur.players) || []).length - capped.length;
+  send('match:querying', { fid: cur ? cur.fid : null, players: capped, skipped });
   let done = 0;
   for (const p of capped) {
     const row = { id: p.id, name: p.name, team: p.team, info: null, error: null };
@@ -219,7 +219,7 @@ async function queryCurrentMatch() {
     send('match:player', row);
     send('budget', budgetPayload({ done, total: capped.length, skipped }));
   }
-  send('match:done', { fid: cur.fid, count: capped.length });
+  send('match:done', { fid: cur ? cur.fid : null, count: capped.length });
   send('budget', budgetPayload({ done: capped.length, total: capped.length, skipped, finished: true }));
 }
 

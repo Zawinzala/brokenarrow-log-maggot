@@ -728,7 +728,7 @@ async function init() {
   BA.onMatchDone((d) => {
     querying = false;
     const done = Object.values(matchRows).filter((r) => r.status === 'done').length;
-    $('queryStatus').textContent = `查询完成：${done} 位玩家（对局 ${d.fid}）`;
+    $('queryStatus').textContent = `查询完成：${done} 位玩家（${d.fid ? '对局 ' + d.fid : '房间'}）`;
   });
   BA.onArchiveChanged((list) => renderArchive(list));
   BA.onBudget(renderBudget);
