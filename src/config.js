@@ -12,10 +12,20 @@ const DEFAULTS = {
   apiDelayMs: 350,
   // 是否在检测到对局后自动查询所有玩家
   autoQueryCurrentMatch: true,
+  // 真实输入统计（全局鼠标+键盘钩子，默认关闭，反作弊风险自担）
+  inputHookEnabled: false,
   // 24 小时 API 调用配额上限（超过后当天不再请求）
-  apiDailyLimit: 120,
+  apiDailyLimit: 240,
   // 心跳统计（匿名 ID + 版本号；作者自建服务器，可在设置里关闭）
   heartbeatEnabled: true,
+  // 界面主题：dark / light / cyan / orange
+  theme: 'dark',
+  // 封禁监控：每小时检查封禁名单并提醒新增
+  banPollEnabled: true,
+  // 每小时同步本机最近对局（用于玩家追踪回填）
+  matchSyncEnabled: true,
+  // 封禁追踪卡片默认隐藏（设置里勾选才显示）
+  banCardVisible: false,
   heartbeatUrl: 'https://heartbeat-service.zawin-zala.workers.dev',
   // 玩家报告使用的近期对局页数（每页 5 局）
   reportMatchPages: 4,
@@ -89,6 +99,7 @@ class Config {
       if (fs.existsSync(this.file)) {
         const raw = JSON.parse(fs.readFileSync(this.file, 'utf8'));
         this.data = { ...DEFAULTS, ...raw, cacheTtl: { ...DEFAULTS.cacheTtl, ...(raw.cacheTtl || {}) } };
+        this.data.apiDailyLimit = DEFAULTS.apiDailyLimit; // 24h 配额为固定值，不随旧配置残留
       }
     } catch (e) {
       // 配置损坏时回退默认值
@@ -111,6 +122,7 @@ class Config {
 
   set(patch) {
     this.data = { ...this.data, ...patch };
+    this.data.apiDailyLimit = DEFAULTS.apiDailyLimit; // 固定配额
     this.save();
     return this.get();
   }

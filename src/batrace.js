@@ -75,17 +75,17 @@ class BatraceClient {
     return next;
   }
 
-  async _get(p, { ttl, cacheKey, retries = 2 } = {}) {
+  async _get(p, { ttl, cacheKey, retries = 2, countUsage = true } = {}) {
     const key = cacheKey || p;
     if (ttl && this.cache) {
       const hit = this.cache.get(key, ttl);
       if (hit) return hit;
     }
-    // 24h 配额检查：命中缓存不算调用，但真正请求要先过配额
-    if (this.usage && this.usage.left() <= 0) {
+    // 24h 配额检查：命中缓存不算调用，但真正请求要先过配额；后台轻量同步接口（封禁/本机对局）不计配额
+    if (this.usage && countUsage && this.usage.left() <= 0) {
       throw new Error('API 配额已用尽（24 小时内最多 ' + this.usage.limit + ' 次），请明天再试');
     }
-    if (this.usage) this.usage.record();
+    if (this.usage && countUsage) this.usage.record();
     this.networkCalls = (this.networkCalls || 0) + 1; // 真正打到 batrace 的请求数（缓存命中不计）
     if (this.onUsage) this.onUsage(); // 实时通知用量变化（配额/次数）
     await this._throttle();
@@ -139,6 +139,20 @@ class BatraceClient {
     });
   }
 
+  // 本机最近对局（后台同步用，不计 24h 配额；TTL 30 分钟保证每小时真拉取）
+  playerMatchesRecent(stbid, limit = 10) {
+    return this._get(`/api/players/matches?stbid=${encodeURIComponent(stbid)}&limit=${limit}`, {
+      ttl: 30 * 60 * 1000, cacheKey: `myMatches:${stbid}:${limit}`
+    });
+  }
+
+  // 封禁名单（后台同步用，不计 24h 配额；TTL 1 小时）
+  leaderboardBan(limit = 500, offset = 0) {
+    return this._get(`/api/leaderboard/ban?limit=${limit}&offset=${offset}`, {
+      ttl: 3600 * 1000, cacheKey: `ban:${limit}:${offset}`
+    });
+  }
+
   matchById(matchId) {
     return this._get(`/api/match?matchid=${encodeURIComponent(matchId)}`, {
       ttl: 24 * 3600 * 1000, cacheKey: `match:${matchId}`
@@ -151,6 +165,14 @@ class BatraceClient {
       ttl: 24 * 3600 * 1000, cacheKey: `amatch:${matchId}`
     });
   }
+
+  // 单局数据（后台补胜负用：与 analysisMatch 同缓存，但不计 24h 配额）
+  analysisMatchNoCount(matchId) {
+    return this._get(`/api/analysis/match?matchid=${encodeURIComponent(matchId)}`, {
+      ttl: 24 * 3600 * 1000, cacheKey: `amatch:${matchId}`
+    });
+  }
+
 
   usageLeft() {
     return this.usage ? this.usage.left() : null;

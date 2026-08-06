@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld('api', {
 
   // 当前对局查询
   queryCurrentMatch: () => ipcRenderer.invoke('match:queryCurrent'),
+  queryRoster: (players) => ipcRenderer.invoke('match:queryRoster', players),
   onMatchQuerying: (cb) => ipcRenderer.on('match:querying', (e, d) => cb(d)),
   onMatchPlayer: (cb) => ipcRenderer.on('match:player', (e, d) => cb(d)),
   onMatchDone: (cb) => ipcRenderer.on('match:done', (e, d) => cb(d)),
@@ -35,13 +36,26 @@ contextBridge.exposeInMainWorld('api', {
   // API 用量 + 心跳
   getUsage: () => ipcRenderer.invoke('usage:get'),
   getHeartbeat: () => ipcRenderer.invoke('heartbeat:get'),
-  pingHeartbeat: () => ipcRenderer.invoke('heartbeat:ping'),
+  pingHeartbeat: (url) => ipcRenderer.invoke('heartbeat:ping', url),
   onHeartbeat: (cb) => ipcRenderer.on('heartbeat', (e, d) => cb(d)),
 
   // 档案
   getArchive: () => ipcRenderer.invoke('archive:list'),
   clearArchive: () => ipcRenderer.invoke('archive:clear'),
   onArchiveChanged: (cb) => ipcRenderer.on('archive:changed', (e, d) => cb(d)),
+
+  // 玩家追踪
+  getPlayerProfile: (id) => ipcRenderer.invoke('tracker:profile', id),
+  getBans: () => ipcRenderer.invoke('tracker:getBans'),
+  syncBans: () => ipcRenderer.invoke('tracker:syncBans'),
+  testBanNotify: () => ipcRenderer.invoke('test:banNotify'),
+  syncMyMatchesNow: () => ipcRenderer.invoke('match:syncNow'),
+  getTrackerMatches: () => ipcRenderer.invoke('tracker:matches'),
+  getMatchDetail: (fid) => ipcRenderer.invoke('tracker:matchDetail', fid),
+  onBansChanged: (cb) => ipcRenderer.on('bans:changed', (e, d) => cb(d)),
+  onBanAlert: (cb) => ipcRenderer.on('bans:alert', (e, d) => cb(d)),
+  getCheaters: () => ipcRenderer.invoke('tracker:cheaters'),
+  onMatchesChanged: (cb) => ipcRenderer.on('matches:changed', (e, d) => cb(d)),
 
   // 外部链接
   openExternal: (url) => ipcRenderer.invoke('shell:open', url),
@@ -52,6 +66,17 @@ contextBridge.exposeInMainWorld('api', {
   backupDecks: (names, packageName) => ipcRenderer.invoke('deck:backup', { names, packageName }),
   deployDecks: (packageName) => ipcRenderer.invoke('deck:deploy', packageName),
   deleteDecks: (kind, names) => ipcRenderer.invoke('deck:delete', { kind, names }),
-  openDeckFolder: (kind) => ipcRenderer.invoke('deck:openFolder', kind)
+  syncRestore: () => ipcRenderer.invoke('deck:syncRestore'),
+  syncIgnore: () => ipcRenderer.invoke('deck:syncIgnore'),
+  syncDismiss: () => ipcRenderer.invoke('deck:syncDismiss'),
+  openDeckFolder: (kind) => ipcRenderer.invoke('deck:openFolder', kind),
+  onDeckChanged: (cb) => ipcRenderer.on('deck:changed', (e, d) => cb(d)),
+  onDeckSyncAlert: (cb) => ipcRenderer.on('deck:syncAlert', (e, d) => cb(d)),
+
+  // APM 统计
+  onApmStart: (cb) => ipcRenderer.on('apm:start', (e, d) => cb(d)),
+  onApmLive: (cb) => ipcRenderer.on('apm:live', (e, d) => cb(d)),
+  onApmResult: (cb) => ipcRenderer.on('apm:result', (e, d) => cb(d)),
+  onApmIdle: (cb) => ipcRenderer.on('apm:idle', (e, d) => cb(d))
 });
 

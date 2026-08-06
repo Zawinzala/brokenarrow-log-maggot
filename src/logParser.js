@@ -5,6 +5,8 @@
 // 常用正则（已按实测日志验证）
 const RE = {
   persona: /^Log: GetPersonaName\s+(.+)$/,
+
+  loginSuccess: /^Log: \[AUTH\] Rest: Login success/,
   lobbyEnter: /^Log: Enter to lobby \(id: \d+\)/,
   lobbyExit: /^Log: Exit lobby/,
   incoming: /^Log: Incoming client (.*?):(\d+) to lobby/,
@@ -46,6 +48,8 @@ class LogParser {
     this.current = null;      // 当前对局（进行中或最近一次）
     this.archived = [];       // 已完成对局
     this.lastEnded = null;    // 刚结束的对局（等网络统计补时长）
+    this._sessionLogin = false;  // 本次会话是否已完成登录
+    this._sessionPersona = null; // 本次会话的 Steam 玩家名
     this._inPlayerList = false;
   }
 
@@ -57,6 +61,8 @@ class LogParser {
     this.current = null;
     this.archived = [];
     this._inPlayerList = false;
+    this._sessionLogin = false;
+    this._sessionPersona = null;
   }
 
   feed(lines) {
@@ -74,7 +80,13 @@ class LogParser {
 
     if ((m = RE.persona.exec(line))) {
       this.localName = m[1].trim();
+      this._sessionPersona = m[1].trim();
       ev('localName', this.localName);
+      return;
+    }
+
+    if (RE.loginSuccess.test(line)) {
+      this._sessionLogin = true;
       return;
     }
 
@@ -206,8 +218,11 @@ class LogParser {
   }
 
   snapshot() {
+    const accountKey = this._sessionPersona ? 'persona:' + this._sessionPersona : null;
     return {
       localName: this.localName,
+      accountKey,
+      loginSeen: !!this._sessionLogin,
       lobbyPlayers: { ...this.lobbyPlayers },
       currentDeck: this.currentDeck,
       current: this.current ? { ...this.current } : null,

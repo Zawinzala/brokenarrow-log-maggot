@@ -6,7 +6,7 @@
 const path = require('path');
 
 // 地图名注册表：从 analysis 响应的 mapPerformance 免费收集真实地图名
-const MAP_NAMES = { 3: 'Baltiisk', 9: 'Airport' };
+const MAP_NAMES = { 3: 'Baltiisk', 4: 'Coast', 6: 'River', 7: 'Dam', 9: 'Airport', 10: 'Frontiers', 11: 'Central Village', 12: 'Oil refinery', 13: 'Suwalki', 16: 'Klaipeda', 17: 'Ruda', 20: 'Parnu', 21: 'Chernyakhovsk', 22: 'Ignalina Powerplant' };
 function registerMapNames(mapPerformance) {
   if (!Array.isArray(mapPerformance)) return;
   for (const m of mapPerformance) {

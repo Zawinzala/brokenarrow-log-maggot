@@ -8,7 +8,7 @@ try { app.setPath('userData', path.join(__dirname, '.smoke-data')); } catch (e) 
 // 注册桩处理器：冒烟测试不跑主应用，只验证渲染层（preload/脚本/按钮）
 function registerStubIpc() {
   const { ipcMain } = require('electron');
-  const cfg = { logDir: '', pollMs: 1500, apiDelayMs: 350, autoQueryCurrentMatch: true };
+  const cfg = { logDir: '', pollMs: 1500, apiDelayMs: 350, autoQueryCurrentMatch: true, inputHookEnabled: false };
   const handle = (ch, fn) => ipcMain.handle(ch, fn);
   handle('config:get', () => ({ ...cfg }));
   handle('config:set', (e, patch) => Object.assign(cfg, patch));
@@ -23,11 +23,25 @@ function registerStubIpc() {
   handle('archive:list', () => []);
   handle('archive:clear', () => true);
   handle('deck:paths', () => ({ decks: '', backups: '' }));
-  handle('deck:list', () => ({ decks: [], backups: [], decksDir: '(桩)', backupsDir: '(桩)' }));
+  handle('deck:list', () => ({ decks: [], backups: [], sync: [], decksDir: '(桩)', backupsDir: '(桩)', syncDir: '(桩)', found: false }));
   handle('deck:backup', () => ({ ok: true, message: 'smoke' }));
   handle('deck:deploy', () => ({ ok: true, message: 'smoke' }));
   handle('deck:delete', () => ({ ok: true, message: 'smoke' }));
+  handle('deck:syncRestore', () => ({ ok: true, message: 'smoke' }));
+  handle('deck:syncIgnore', () => ({ ok: true, message: 'smoke' }));
+  handle('deck:syncDismiss', () => ({ ok: true, message: 'smoke' }));
   handle('deck:openFolder', () => true);
+  handle('usage:get', () => ({ used24h: 0, limit24h: 120, calls: 0 }));
+  handle('heartbeat:get', () => null);
+  handle('heartbeat:ping', () => null);
+  handle('app:version', () => null);
+  handle('report:maggot', () => ({ error: 'smoke' }));
+  handle('match:queryRoster', () => true);
+  handle('tracker:profile', () => ({ id: '0', player: null, stats: {}, encounters: [], nameHistory: [], banned: false, banInfo: null, info: null }));
+  handle('tracker:getBans', () => ({ list: [], lastSync: 0 }));
+  handle('tracker:syncBans', () => ({ list: [], lastSync: 0 }));
+  handle('tracker:matches', () => ({ list: [] }));
+  handle('tracker:matchDetail', () => null);
   handle('shell:open', () => true);
 }
 

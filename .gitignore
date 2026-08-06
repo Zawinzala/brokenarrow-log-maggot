@@ -1,4 +1,4 @@
-# 依赖与构建产物
+﻿# 依赖与构建产物
 node_modules/
 dist/
 .smoke-data/
@@ -19,3 +19,7 @@ Thumbs.db
 Desktop.ini
 .DS_Store
 .vscode/
+
+# 本地临时补丁/测试目录
+.patchtmp/
+smoke-result.txt
