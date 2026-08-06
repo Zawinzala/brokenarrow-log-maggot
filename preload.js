@@ -49,6 +49,7 @@ contextBridge.exposeInMainWorld('api', {
   getBans: () => ipcRenderer.invoke('tracker:getBans'),
   syncBans: () => ipcRenderer.invoke('tracker:syncBans'),
   testBanNotify: () => ipcRenderer.invoke('test:banNotify'),
+  testVersionUpdate: () => ipcRenderer.invoke('test:versionUpdate'),
   syncMyMatchesNow: () => ipcRenderer.invoke('match:syncNow'),
   getTrackerMatches: () => ipcRenderer.invoke('tracker:matches'),
   getMatchDetail: (fid) => ipcRenderer.invoke('tracker:matchDetail', fid),

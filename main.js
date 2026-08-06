@@ -619,7 +619,8 @@ async function buildProfile(pid) {
 
 // ---------------- 软件版本检查（从用户 GitHub 的 version.txt 读取） ----------------
 const VERSION_URL = 'https://raw.githubusercontent.com/Zawinzala/brokenarrow-log-maggot/main/version.txt';
-let versionInfo = null;
+// 启动即带当前版本：界面徽标/关于不依赖远端检查成功
+let versionInfo = { current: app.getVersion(), latest: app.getVersion(), hasUpdate: false, announcement: '' };
 
 function parseVersion(v) {
   const mm = String(v || '').match(/(\d+)(?:\.(\d+))?(?:\.(\d+))?/);
@@ -732,6 +733,10 @@ function registerIpc() {
   ipcMain.handle('tracker:syncBans', async () => {
     const newly = await syncBanList();
     return { list: tracker.listBans(), lastSync: tracker.data.lastBanSync, newly };
+  });
+  ipcMain.handle('test:versionUpdate', () => {
+    send('version', { current: app.getVersion(), latest: '99.0.0', hasUpdate: true, announcement: '测试：模拟新版本推送提醒' });
+    return { ok: true, message: '已模拟新版本推送（顶部横幅将显示 v99.0.0）' };
   });
   ipcMain.handle('test:banNotify', () => {
     const p = pickEncounteredPlayer();

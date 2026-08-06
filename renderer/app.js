@@ -1237,6 +1237,7 @@ function bindUI() {
   });
   on('btnTestMatchSync', 'click', async () => { const r = await BA.syncMyMatchesNow(); $('testResult').textContent = (r && r.message) || '未知'; });
   on('btnTestBanSync', 'click', async () => { const r = await BA.syncBans(); $('testResult').textContent = (r && r.newly != null) ? ('封禁检查完成，本次新增 ' + r.newly + ' 人') : '封禁检查完成'; });
+  on('btnTestVersion', 'click', async () => { const r = await BA.testVersionUpdate(); $('testResult').textContent = (r && r.message) || '未知'; });
 
   // 卡组工具
   on('btnDeckRefresh', 'click', refreshDecks);

@@ -18,6 +18,7 @@
       guide: 0, splash: 0, ciws: 0,
       kills: { normal: 0, sead: 0, jam: 0, b2: 0, total: 0 },
       nextUpgradeAt: 8,
+      upgradeCount: 0,
       normTimer: 1.8, seadTimer: 6, jamTimer: 15, b2Timer: 26, artTimer: 14,
       planes: [], bullets: [], seadMissiles: [], arties: [],
       upgradePending: false, over: false
@@ -224,7 +225,7 @@
     const y = 40 + Math.random() * (H * 0.42);
     const spdMul = 1 + Math.min(0.35, state.t * 0.002); // 速度增长更温和
     const base = type === 'normal' ? 42 + Math.random() * 22 : type === 'sead' ? 32 + Math.random() * 18 : type === 'jam' ? 46 + Math.random() * 18 : 28 + Math.random() * 14;
-    const hp = type === 'b2' ? 3 : 2;
+    const hp = type === 'b2' ? 3 : (type === 'normal' && state.t > 120) ? 3 : (type === 'jam' && state.t > 150) ? 3 : 2;
     state.planes.push({ type, hp, x: fromLeft ? -30 : W + 30, y, vx: (fromLeft ? 1 : -1) * base * spdMul, seadCd: 3.6, gone: false });
   }
   function nearestTarget() {
@@ -237,7 +238,7 @@
     return best;
   }
   function fireVolley() {
-    const speed = 360 + state.guide * 60;
+    const speed = 360 + state.guide * 40;
     for (let i = 0; i < state.volley; i++) {
       state.bullets.push({ x: state.x + (i - (state.volley - 1) / 2) * 10, y: H - 36, vx: 0, vy: -speed, speed, target: null, lost: false, fade: 0, gone: false });
     }
@@ -252,7 +253,8 @@
       state.kills[t.type] = (state.kills[t.type] || 0) + 1;
       state.kills.total++;
       if (!state.upgradePending && state.kills.total >= state.nextUpgradeAt) {
-        state.nextUpgradeAt += 8;
+        state.nextUpgradeAt += 8 + state.upgradeCount * 2;
+        state.upgradeCount++;
         triggerUpgrade();
       }
     }
@@ -263,8 +265,9 @@
   }
 
   function triggerUpgrade() {
-    state.upgradePending = true;
     const opts = pickUpgrades();
+    if (!opts.length) { state.upgradePending = false; state.score += 100; renderHud(); return; } // 全部升满：不再卡关，加分
+    state.upgradePending = true;
     const wrap = $('gameUpgradeCards');
     wrap.innerHTML = opts.map((o, i) =>
       `<div class="game-up-card" data-i="${i}"><b>${o.label}</b><span>${o.desc}</span></div>`).join('');
@@ -275,11 +278,11 @@
   }
   function pickUpgrades() {
     const pool = [];
-    if (state.fireCd > 0.4) pool.push({ id: 'fire', label: '⚡ 射速+25%', desc: '导弹冷却缩短', apply: () => { state.fireCd *= 0.75; } });
+    if (state.fireCd > 0.55) pool.push({ id: 'fire', label: '⚡ 射速+25%', desc: '导弹冷却缩短', apply: () => { state.fireCd *= 0.75; } });
     if (state.volley < 3) pool.push({ id: 'volley', label: '🎯 齐射+1', desc: '每轮多发一枚（分散目标）', apply: () => { state.volley++; } });
     if (state.guide < 3) pool.push({ id: 'guide', label: '🚀 制导增强', desc: '导弹更快、命中判定更大', apply: () => { state.guide++; } });
     if (state.splash < 1) pool.push({ id: 'splash', label: '💣 近炸引信', desc: '命中溅射周围敌机', apply: () => { state.splash = 1; } });
-    if (state.range < 470) pool.push({ id: 'range', label: '📡 射程+70', desc: '索敌距离增大', apply: () => { state.range += 70; } });
+    if (state.range < 400) pool.push({ id: 'range', label: '📡 射程+70', desc: '索敌距离增大', apply: () => { state.range += 70; } });
     if (state.moveSpeed < 878) pool.push({ id: 'move', label: '🚚 机动强化', desc: '阵地移速×1.5', apply: () => { state.moveSpeed *= 1.5; } });
     if (state.ciws < 3) pool.push({ id: 'ciws', label: '🛡 密集阵', desc: '挡一次致命伤害', apply: () => { state.ciws++; } });
     if (state.spinupBase > 0.1) pool.push({ id: 'quick', label: '⏱ 雷达快启', desc: '开机延迟减半', apply: () => { state.spinupBase = Math.max(0.1, state.spinupBase / 2); } });

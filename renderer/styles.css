@@ -577,3 +577,6 @@ table.matches tbody tr:hover { background: var(--row-hover); }
 .cheater-matches { width: 100%; margin-top: 6px; }
 .cheater-match { display: flex; gap: 10px; align-items: center; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); font-size: 12px; cursor: pointer; }
 .cheater-match:hover { border-color: var(--accent); }
+
+/* 调查/对局详情弹窗在封禁提醒等其它弹窗之上 */
+#investigateModal, #matchModal { z-index: 60; }
