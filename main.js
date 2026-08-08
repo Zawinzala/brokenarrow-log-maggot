@@ -8,7 +8,7 @@ const { Config, detectSteamLogDir } = require('./src/config');
 const { LogParser } = require('./src/logParser');
 const { LogWatcher } = require('./src/logWatcher');
 const { BatraceClient, Cache, ApiUsage } = require('./src/batrace');
-const { Heartbeat } = require('./src/heartbeat');
+const { Heartbeat, fetchViaProxy } = require('./src/heartbeat');
 const { ApiHealth } = require('./src/apiHealth');
 const { ApmTracker } = require('./src/apm');
 const inputHook = require('./src/inputHook');
@@ -693,10 +693,10 @@ function parseVersionText(text) {
 }
 async function checkVersion() {
   try {
-    const res = await fetch(VERSION_URL, { signal: AbortSignal.timeout(10000) });
-    if (!res.ok) return;
-    const text = await res.text();
-    const { version, announcement } = parseVersionText(text);
+    // 版本检查也走「直连 + 免费代理兜底」（与心跳同一套逻辑），国内也能收到更新提醒
+    const via = await fetchViaProxy((u, o) => net.fetch(u, o), VERSION_URL, { timeoutMs: 10000 });
+    if (!via.ok) return;
+    const { version, announcement } = parseVersionText(via.text);
     const latest = parseVersion(version);
     const local = parseVersion(app.getVersion());
     versionInfo = {

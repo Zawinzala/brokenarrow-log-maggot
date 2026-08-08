@@ -1,58 +1,68 @@
-// ================= 断箭蛆工具 · 心跳统计服务（Cloudflare Workers 参考实现） =================
-// 与客户端 src/heartbeat.js 的接口约定一致：
-//   POST /heartbeat  body: { userId, v }  → 上报一次心跳（5 分钟内算在线）
-//   GET  /online-count                    → 返回 { online, today }
-// 上报内容只有匿名 UUID + 软件版本号，不含任何玩家数据。
-//
-// 部署（约 3 分钟）：
-//   1. 注册 Cloudflare 账号并安装 wrangler：npm i -g wrangler && wrangler login
-//   2. 在 Cloudflare 控制台创建一个 KV 命名空间，把 ID 填进 wrangler.toml 的 kv_namespaces.id
-//   3. 在 server 目录执行：wrangler deploy
-//   4. 把得到的 https://xxx.workers.dev/ 填进软件「设置 → 统计服务地址」
+// ================= 断箭蛆工具 · 心跳统计服务（Cloudflare Workers） =================
+// 与线上部署保持一致（ONLINE_KV + user: 前缀 + onlineCount）。
+// 接口：
+//   POST /heartbeat  body: { userId, v }   → 上报心跳（直连）
+//   GET  /heartbeat  ?userId=..&v=..       → 上报心跳（GET 版，免费代理只转发 GET 时兜底用）
+//   GET  /online-count                     → 返回 { onlineCount }
+// 部署：在 Cloudflare 控制台 Workers 编辑页整段粘贴，或 cd server && wrangler deploy。
 export default {
   async fetch(request, env) {
+    const corsHeaders = {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type',
+    };
+
+    if (request.method === 'OPTIONS') {
+      return new Response(null, { headers: corsHeaders });
+    }
+
     const url = new URL(request.url);
-    const path = url.pathname;
-    const kv = env.STATS_KV;
-    const now = Date.now();
-    const FIVE_MIN = 5 * 60 * 1000;
 
-    if (path === '/heartbeat' && request.method === 'POST') {
-      let body = {};
-      try { body = await request.json(); } catch (e) {}
-      const uid = String(body.userId || '').replace(/[^0-9a-zA-Z-]/g, '').slice(0, 64);
-      if (!uid) return json({ error: 'missing userId' }, 400);
-      const v = String(body.v || '').slice(0, 32);
-      await kv.put('hb:' + uid, JSON.stringify({ t: now, v }));
-      return json({ ok: true });
-    }
-
-    if (path === '/online-count') {
-      const d = new Date();
-      const todayStart = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-      const list = await kv.list({ prefix: 'hb:' });
-      let online = 0;
-      let today = 0;
-      const stale = [];
-      for (const key of list.keys) {
-        try {
-          const rec = JSON.parse(await kv.get(key.name));
-          if (now - rec.t > FIVE_MIN) { stale.push(key.name); continue; }
-          online += 1;
-          if (rec.t >= todayStart) today += 1;
-        } catch (e) { stale.push(key.name); }
+    // 1. 心跳上报：POST /heartbeat（body）或 GET /heartbeat（query，代理兜底）
+    if (url.pathname === '/heartbeat' && (request.method === 'POST' || request.method === 'GET')) {
+      let userId = '', v = '';
+      try {
+        if (request.method === 'POST') {
+          const body = await request.json();
+          userId = body.userId;
+          v = body.v;
+        } else {
+          userId = url.searchParams.get('userId') || '';
+          v = url.searchParams.get('v') || '';
+        }
+      } catch (err) {
+        return new Response(JSON.stringify({ error: 'Invalid request' }), {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
       }
-      for (const k of stale) await kv.delete(k); // 清理 5 分钟没心跳的旧记录
-      return json({ online, today });
+
+      userId = String(userId || '').replace(/[^0-9a-zA-Z-]/g, '').slice(0, 64);
+      if (!userId) {
+        return new Response(JSON.stringify({ error: 'Missing userId' }), {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
+      // TTL 建议 >= 客户端心跳间隔（客户端默认每 2 分钟一次心跳）。
+      // 90 秒会在两次心跳之间掉出在线列表约 30 秒；改 300（5 分钟）更稳。
+      await env.ONLINE_KV.put('user:' + userId, Date.now().toString(), { expirationTtl: 300 });
+
+      return new Response(JSON.stringify({ status: 'ok' }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
     }
 
-    return json({ ok: true, service: 'broken-arrow-heartbeat', endpoints: ['POST /heartbeat', 'GET /online-count'] });
+    // 2. 在线人数：GET /online-count
+    if (url.pathname === '/online-count' && request.method === 'GET') {
+      const list = await env.ONLINE_KV.list({ prefix: 'user:' });
+      return new Response(JSON.stringify({ onlineCount: list.keys.length }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+
+    return new Response('Heartbeat Server is running', { status: 200, headers: corsHeaders });
   }
 };
-
-function json(obj, status = 200) {
-  return new Response(JSON.stringify(obj), {
-    status,
-    headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
-  });
-}

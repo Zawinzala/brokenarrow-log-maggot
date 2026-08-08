@@ -29,6 +29,33 @@ function normalizeStats(d) {
   return { online, today: today ?? undefined };
 }
 
+// 通用「直连 + 免费代理兜底」：直连失败（或 skipDirect）后并行试所有代理，首个 2xx 即用。
+// 供心跳上报/在线人数/版本检查共用。注意：代理只转发 GET（服务端已支持 GET /heartbeat）。
+async function fetchViaProxy(fetchImpl, url, { skipDirect = false, timeoutMs = 8000 } = {}) {
+  const doFetch = (target) => {
+    const init = { signal: AbortSignal.timeout(timeoutMs) };
+    return fetchImpl(target, init);
+  };
+  if (!skipDirect) {
+    try {
+      const r = await doFetch(url);
+      if (r.ok) return { ok: true, text: await r.text(), via: null };
+    } catch (e) {}
+  }
+  const results = await Promise.all(PROXIES.map(async (p) => {
+    try {
+      const r = await doFetch(p.wrap(url));
+      if (!r.ok) return null;
+      let text = await r.text();
+      if (p.unwrap) {
+        try { const w = JSON.parse(text); if (w && typeof w.contents === 'string') text = w.contents; } catch (e) {}
+      }
+      return { ok: true, text, via: p.name };
+    } catch (e) { return null; }
+  }));
+  return results.find((r) => r) || { ok: false, text: '', via: null };
+}
+
 class Heartbeat {
   /**
    * @param {object} opts
@@ -84,7 +111,9 @@ class Heartbeat {
   async _tick(urlOverride) {
     const base = urlOverride ? String(urlOverride).trim().replace(/\/+$/, '') : this.url;
     if (!base) { this.lastError = '未配置统计服务地址'; return; }
-    // 1) 上报心跳
+    this.viaProxy = null; // 每轮重置：本轮 POST 或 GET 任一走了代理则记录
+    // 1) 上报心跳：直连 POST；失败后走代理 GET 兜底（服务端已支持 GET /heartbeat?userId=&v=）
+    let posted = false;
     try {
       const res = await this.fetchImpl(base + '/heartbeat', {
         method: 'POST',
@@ -93,6 +122,7 @@ class Heartbeat {
         signal: AbortSignal.timeout(8000)
       });
       if (res.ok) {
+        posted = true;
         this.lastPing = Date.now();
         this.lastError = '';
       } else {
@@ -100,6 +130,16 @@ class Heartbeat {
       }
     } catch (e) {
       this.lastError = '上报失败：' + (e && e.message || e);
+    }
+    if (!posted) {
+      // 直连 POST 失败 → 代理 GET 兜底（GET 编码 userId/v，免费代理都能转发；不影响计数——计数按匿名 userId 去重）
+      const hbGet = base + '/heartbeat?userId=' + encodeURIComponent(this.uid) + '&v=' + encodeURIComponent(this.version);
+      const via = await fetchViaProxy(this.fetchImpl, hbGet, { skipDirect: true });
+      if (via.ok) {
+        this.lastPing = Date.now();
+        this.lastError = '';
+        this.viaProxy = via.via || this.viaProxy;
+      }
     }
     // 2) 拉取在线人数（直连失败自动走免费代理）；无论成败都推送状态，界面据此显示绿灯/红灯
     const stats = await this._fetchOnlineCount(base);
@@ -121,7 +161,6 @@ class Heartbeat {
   // 拉取在线人数：先直连（8s），失败按 PROXIES 依次走代理（各 8s），首个成功即用
   async _fetchOnlineCount(base) {
     const url = base + '/online-count';
-    this.viaProxy = null;
     try {
       const r = await this.fetchImpl(url, { signal: AbortSignal.timeout(8000) });
       if (r.ok) {
@@ -133,21 +172,12 @@ class Heartbeat {
     } catch (e) {
       this.lastError = '在线人数获取失败（直连）：' + (e && e.message || e);
     }
-    // 直连失败 → 并行尝试所有代理，首个成功即用（最坏约等于单次超时，而非逐个累加）
-    const results = await Promise.all(PROXIES.map(async (p) => {
-      try {
-        const r = await this.fetchImpl(p.wrap(url), { signal: AbortSignal.timeout(8000) });
-        if (!r.ok) return null;
-        let body = await r.text();
-        if (p.unwrap) {
-          try { const w = JSON.parse(body); if (w && typeof w.contents === 'string') body = w.contents; } catch (e) {}
-        }
-        const st = normalizeStats(JSON.parse(body));
-        return st ? { proxy: p.name, stats: st } : null;
-      } catch (e) { return null; }
-    }));
-    const hit = results.find((r) => r && r.stats);
-    if (hit) { this.viaProxy = hit.proxy; this.lastError = ''; return hit.stats; }
+    // 直连失败 → 并行尝试所有代理，首个 2xx 即用（最坏约等于单次超时）
+    const via = await fetchViaProxy(this.fetchImpl, url, { skipDirect: true });
+    if (via.ok) {
+      const st = normalizeStats(JSON.parse(via.text));
+      if (st) { this.viaProxy = via.via; this.lastError = ''; return st; }
+    }
     if (!this.lastError) this.lastError = '在线人数获取失败（直连与代理均失败）';
     return null;
   }
@@ -170,4 +200,4 @@ class Heartbeat {
   }
 }
 
-module.exports = { Heartbeat };
+module.exports = { Heartbeat, fetchViaProxy };
