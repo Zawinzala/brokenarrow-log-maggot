@@ -18,7 +18,8 @@
       <span id="statusText">未监听</span>
       <span id="fileText" class="dim"></span>
       <span id="budgetText" class="dim" title="本机 24 小时内实际请求 BATrace 的次数（缓存命中不计）"></span>
-      <span id="onlineText" class="dim" title="统计服务返回的当前在线用户数（可在设置里关闭）"></span>
+      <span id="apiHealth" class="api-health" title="BATrace API 稳定性检测中…">BATrace ●</span>
+      <span id="onlineText" class="online" title="统计服务返回的当前在线用户数（可在设置里关闭）">● 0 人正在使用</span>
     </div>
     <div class="actions">
       <button id="btnGame" class="btn btn-ghost" title="防空小游戏（开发者娱乐）">🎮 小游戏</button>
@@ -74,12 +75,12 @@
       </div>
       <div id="deckSyncAlert" class="sync-alert hidden">
         <div class="sync-alert-text">
-          <b>⚠️ 检测到切换 Steam 账号</b>
-          <span class="dim">可以把上一账号的全部卡组（共 <b id="syncCount">0</b> 份，同名覆盖）同步回前线。</span>
+          <b>⚠️ 检测到切换账号</b>
+          <span class="dim">是否替换成换号前（ID：<b id="syncFrom"></b>）的上一局的卡组包？（同名卡组将被覆盖；原包仍在后勤仓库 <b>上一局卡组包.zip</b>）</span>
           <span id="syncAccountInfo" class="dim"></span>
         </div>
         <div class="sync-alert-actions">
-          <button id="btnSyncRestore" class="btn btn-primary">⬇ 同步回来</button>
+          <button id="btnSyncRestore" class="btn btn-primary">⬇ 替换成上一局卡组包</button>
           <button id="btnSyncIgnore" class="btn btn-ghost">忽略（保留当前）</button>
           <button id="btnSyncDismiss" class="btn btn-ghost">✕</button>
         </div>
@@ -213,6 +214,11 @@
       <label class="check"><input id="setBanPoll" type="checkbox" /> 封禁监控（每小时检查封禁名单，发现新封弹窗提醒）</label>
       <label class="check"><input id="setMatchSync" type="checkbox" /> 每小时同步我的对局记录（用于玩家追踪回填相遇/胜负/改名史）</label>
       <label class="check"><input id="setBanCard" type="checkbox" /> 显示封禁追踪栏目（默认隐藏）</label>
+      <label class="check"><input id="setMultiBond" type="checkbox" /> 多账号联动羁绊检查（换号也视为同一人，默认开）</label>
+      <div class="accounts-block">
+        <div class="test-title dim">👥 账号数据管理（删除会同时清理该账号的对局/相遇数据与卡组归档文件夹）</div>
+        <div id="accountList" class="inv-list"></div>
+      </div>
       <div class="test-block">
         <div class="test-title dim">🧪 开发者测试（不影响正常功能）</div>
         <div class="search-row" style="flex-wrap:wrap">

@@ -500,6 +500,22 @@ table.matches tbody tr:hover { background: var(--row-hover); }
 .ban-item .ban-tag { margin-left: auto; color: var(--warn); font-size: 11px; }
 .ban-item .ban-tag.met { color: var(--bad); }
 
+/* 设置：账号数据管理 */
+.account-item {
+  display: flex; gap: 8px; flex-wrap: wrap; align-items: center; padding: 6px 10px;
+  border: 1px solid var(--line); border-radius: 8px; background: var(--card2);
+  margin-bottom: 6px;
+}
+.account-item b { color: var(--text); }
+.account-item .btn-xs { padding: 2px 8px; font-size: 12px; }
+
+/* 顶栏状态灯：BATrace 稳定性 + 在线人数（统一大小） */
+.api-health, .online { font-size: 12px; margin-left: 6px; white-space: nowrap; color: #6b7280; }
+.api-health.ok, .online.ok { color: #4ade80; text-shadow: 0 0 6px rgba(74,222,128,.6); }
+.api-health.warn { color: #facc15; text-shadow: 0 0 6px rgba(250,204,21,.5); }
+.api-health.down, .online.err { color: #f87171; text-shadow: 0 0 6px rgba(248,113,113,.6); }
+.accounts-block { margin: 10px 0; }
+
 /* ===== 玩家调查弹窗 ===== */
 .modal-box.wide { width: 720px; max-width: 94vw; max-height: 88vh; overflow-y: auto; }
 .inv-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
@@ -579,4 +595,5 @@ table.matches tbody tr:hover { background: var(--row-hover); }
 .cheater-match:hover { border-color: var(--accent); }
 
 /* 调查/对局详情弹窗在封禁提醒等其它弹窗之上 */
-#investigateModal, #matchModal { z-index: 60; }
+#matchModal { z-index: 60; }
+#investigateModal, #banAlertModal { z-index: 70; } /* 调查/封禁弹窗置于对局详情之上 */

@@ -17,11 +17,14 @@ class PlayerTracker {
       matches: {},
       players: {},
       knownBans: {},
-      localId: null,
+      playerSnapshots: {}, // id -> { id, name, elo, winRate, category, matchCount, kd, at }（离线兜底用）
+      localAccounts: {}, // 本机所有账号：id -> { id, name, persona, firstSeen, lastSeen }
+      localId: null,     // 最近活跃主账号
       lastBanSync: 0,
       lastMatchSync: 0
     };
     this._localName = null;
+    this._multiAccountBond = true; // 多账号联动羁绊检查（换号也视为同一人），默认开
     this._load();
   }
 
@@ -34,6 +37,8 @@ class PlayerTracker {
             this.data.matches = raw.matches || {};
             this.data.players = raw.players || {};
             this.data.knownBans = raw.knownBans || {};
+            this.data.playerSnapshots = raw.playerSnapshots || {};
+            this.data.localAccounts = raw.localAccounts || {};
             this.data.localId = raw.localId || null;
             this.data.lastBanSync = raw.lastBanSync || 0;
             this.data.lastMatchSync = raw.lastMatchSync || 0;
@@ -44,6 +49,7 @@ class PlayerTracker {
       }
     } catch (e) { /* 损坏用默认空库 */ }
     this._evict();
+    this._migrateLocalAccounts();
   }
 
   // v1 → v2：只保留数字对局 ID 的局，按 fid 聚合玩家；t: 无 ID 记录丢弃
@@ -80,14 +86,18 @@ class PlayerTracker {
         }
       }
     }
+    const seeded = raw.localId != null ? { [String(raw.localId)]: { id: String(raw.localId), name: '', persona: '', firstSeen: null, lastSeen: null } } : {};
     this.data = {
       version: 2,
       matches, players,
       knownBans: raw.knownBans || {},
+      playerSnapshots: raw.playerSnapshots || {},
+      localAccounts: raw.localAccounts || seeded,
       localId: raw.localId || null,
       lastBanSync: raw.lastBanSync || 0,
       lastMatchSync: raw.lastMatchSync || 0
     };
+    this._migrateLocalAccounts();
     this._flush();
   }
 
@@ -137,8 +147,102 @@ class PlayerTracker {
   setLocalId(id, name, at = Date.now()) {
     if (id == null || id === '') return;
     this.data.localId = String(id);
+    this._noteLocalAccount(String(id), name, null, at);
     if (name) this.observe(id, name, { at });
     this._flush();
+  }
+
+  setMultiAccountBond(v) { this._multiAccountBond = v !== false; }
+
+  // 所有“本机账号”的玩家 ID；关闭多账号联动时只返回主账号
+  localIds() {
+    if (!this._multiAccountBond) {
+      return this.data.localId ? [String(this.data.localId)] : [];
+    }
+    const ids = Object.keys(this.data.localAccounts || {});
+    if (this.data.localId && !ids.includes(String(this.data.localId))) ids.push(String(this.data.localId));
+    return ids;
+  }
+
+  _noteLocalAccount(id, name, persona, at = Date.now()) {
+    const k = String(id);
+    const a = this.data.localAccounts[k] || { id: k, name: '', persona: '', firstSeen: null, lastSeen: null };
+    if (name && !a.name) a.name = String(name);
+    if (persona && !a.persona) a.persona = String(persona);
+    if (!a.firstSeen) a.firstSeen = at;
+    a.lastSeen = Math.max(a.lastSeen || 0, at);
+    this.data.localAccounts[k] = a;
+  }
+
+  // 在一场对局里找到“本机玩家”（优先队伍信息完整者）
+  _pickLocalForMatch(m) {
+    const ids = this.localIds();
+    if (!ids.length || !m || !Array.isArray(m.players)) return null;
+    const inMatch = m.players.filter((p) => p.id != null && ids.includes(String(p.id)));
+    if (!inMatch.length) return null;
+    return inMatch.find((p) => p.teamId != null || p.team) || inMatch[0];
+  }
+
+  _migrateLocalAccounts() {
+    try {
+      if (!this.data.localAccounts || typeof this.data.localAccounts !== 'object') this.data.localAccounts = {};
+      let changed = false;
+      if (this.data.localId && !this.data.localAccounts[String(this.data.localId)]) {
+        this.data.localAccounts[String(this.data.localId)] = { id: String(this.data.localId), name: '', persona: '', firstSeen: null, lastSeen: null };
+        changed = true;
+      }
+      const ids = new Set(Object.keys(this.data.localAccounts));
+      for (const m of Object.values(this.data.matches)) {
+        if (m.localPlayerId == null) {
+          const cands = (m.players || []).filter((p) => p.id != null && ids.has(String(p.id)));
+          if (cands.length === 1) { m.localPlayerId = String(cands[0].id); changed = true; }
+        }
+      }
+      if (changed) this._flush();
+    } catch (e) {}
+  }
+
+  // 账号数据管理：列出本机账号（含各自场次）
+  listAccounts() {
+    const ids = new Set(this.localIds());
+    const out = [];
+    for (const a of Object.values(this.data.localAccounts || {})) {
+      let matchCount = 0;
+      for (const m of Object.values(this.data.matches)) {
+        if (m.localPlayerId != null) {
+          if (String(m.localPlayerId) === String(a.id)) matchCount++;
+        } else if (ids.has(String(a.id)) && (m.players || []).some((p) => p.id != null && String(p.id) === String(a.id))) {
+          matchCount++;
+        }
+      }
+      out.push({ id: a.id, name: a.name || '', persona: a.persona || '', firstSeen: a.firstSeen || null, lastSeen: a.lastSeen || null, matchCount });
+    }
+    out.sort((x, y) => (y.lastSeen || 0) - (x.lastSeen || 0));
+    return out;
+  }
+
+  // 删除指定账号：移除账号记录 + 该账号为“本机玩家”的对局 + 玩家表里该 id 的记录
+  deleteAccount(id) {
+    const k = String(id);
+    const acc = this.data.localAccounts[k] || null;
+    delete this.data.localAccounts[k];
+    const ids = this.localIds(); // 删除后的本机账号集合
+    const removed = [];
+    for (const [fid, m] of Object.entries(this.data.matches)) {
+      const isLocal = m.localPlayerId != null
+        ? String(m.localPlayerId) === k
+        : (m.players || []).some((p) => p.id != null && String(p.id) === k)
+          && !(m.players || []).some((p) => p.id != null && ids.includes(String(p.id)));
+      if (isLocal) { delete this.data.matches[fid]; removed.push(fid); }
+    }
+    delete this.data.players[k];
+    if (this.data.localId != null && String(this.data.localId) === k) {
+      const rest = Object.values(this.data.localAccounts).sort((x, y) => (y.lastSeen || 0) - (x.lastSeen || 0));
+      this.data.localId = rest.length ? rest[0].id : null;
+    }
+    this._evict();
+    this._flush();
+    return { removedMatches: removed.length, removedAccount: !!acc, persona: acc ? acc.persona || '' : '' };
   }
 
   // 轻量“见过”：只更新名字史与最近出现（房间/大厅/搜索/报告）
@@ -160,13 +264,18 @@ class PlayerTracker {
     if (!NUM_FID.test(fid)) return; // 无对局 ID 的局不纳入统计
     const localName = m.localName || this._localName || null;
     const me = localName ? m.players.find((pl) => pl.name === localName) : null;
-    if (me && me.id != null) this.data.localId = String(me.id);
+    const persona = m.accountKey ? String(m.accountKey).replace(/^persona:/, '') : null;
+    if (me && me.id != null) {
+      this.data.localId = String(me.id);
+      this._noteLocalAccount(String(me.id), me.name, persona, at);
+    }
     const localTeam = me ? (me.team === 'Spectators' ? null : (me.team || null)) : null;
     let rec = this.data.matches[fid];
     if (!rec) {
       rec = {
         fid, mapId: null, map: m.map || '', endTime: m.endTime || at, durationSec: m.durationSec || null,
         winnerTeam: null, localWon: null, localTeam, custom: null,
+        localPlayerId: me && me.id != null ? String(me.id) : null, localPersona: persona || null,
         players: [], source: 'log', firstSeenAt: at, syncedAt: null
       };
       this.data.matches[fid] = rec;
@@ -177,6 +286,8 @@ class PlayerTracker {
       if (rec.durationSec == null && m.durationSec != null) rec.durationSec = m.durationSec;
       if (!rec.localTeam && localTeam) rec.localTeam = localTeam;
       if (!rec.firstSeenAt) rec.firstSeenAt = at;
+      if (me && me.id != null && rec.localPlayerId == null) rec.localPlayerId = String(me.id);
+      if (persona && !rec.localPersona) rec.localPersona = persona;
     }
     for (const pl of m.players) {
       if (pl.id == null) continue;
@@ -210,7 +321,10 @@ class PlayerTracker {
       const localName = this._localName || null;
       const myEntryByName = !myEntry && localName ? Object.values(data).find((x) => x.Name === localName) : null;
       const me = myEntry || myEntryByName;
-      if (!myEntry && myEntryByName && myEntryByName.Id != null) this.data.localId = String(myEntryByName.Id);
+      if (me && me.Id != null) {
+        this.data.localId = String(me.Id);
+        this._noteLocalAccount(String(me.Id), me.Name, null, at);
+      }
       // 队伍编码：players/matches 的 TeamId —— 1=队伍B、缺失=队伍A、100=观战
       const normalizeTeam = (tid) => {
         if (tid === 100) return { teamId: null, team: 'Spectators' };
@@ -250,8 +364,10 @@ class PlayerTracker {
       const rec = this.data.matches[fid] || {
         fid, mapId: null, map: '', endTime: null, durationSec: null,
         winnerTeam: null, localWon: null, localTeam: null, custom: null,
+        localPlayerId: me && me.Id != null ? String(me.Id) : null, localPersona: null,
         players: [], source: 'api', firstSeenAt: at, syncedAt: null
       };
+      if (me && me.Id != null && rec.localPlayerId == null) rec.localPlayerId = String(me.Id);
       rec.mapId = mapId != null ? mapId : rec.mapId;
       if (!rec.map) rec.map = mapId != null ? ('map:' + mapId) : '';
       if (endTime) rec.endTime = endTime;
@@ -291,8 +407,14 @@ class PlayerTracker {
     fid = String(fid);
     const rec = this.data.matches[fid];
     if (!rec || rec.localWon != null) return null;
-    const local = this.data.localId ? rec.players.find((p) => p.id === String(this.data.localId)) : null;
-    const tid = local ? local.teamId : null;
+    const local = this._pickLocalForMatch(rec);
+    // 优先级：本机玩家 teamId（API 局）→ 本机玩家 team 文本 → rec.localTeam 标签
+    let tid = null;
+    if (local && local.teamId != null) tid = local.teamId;
+    if (tid == null && local && local.team === 'Bravo') tid = 1;
+    if (tid == null && local && local.team === 'Alpha') tid = 0;
+    if (tid == null && rec.localTeam === 'Bravo') tid = 1;
+    if (tid == null && rec.localTeam === 'Alpha') tid = 0;
     if (tid == null) return null;
     rec.localWon = (tid === winnerTeamId);
     rec.winnerTeam = winnerTeamId;
@@ -300,11 +422,81 @@ class PlayerTracker {
     return rec.localWon;
   }
 
+  // 保存玩家「上次已知情报」快照（仅在有真实成功数据时调用，离线不回写脏数据）
+  savePlayerSnapshot(id, info) {
+    if (id == null || !info || typeof info !== 'object') return;
+    const k = String(id);
+    const prev = this.data.playerSnapshots[k] || { id: k, name: '', elo: null, winRate: null, category: null, matchCount: null, kd: null, at: 0 };
+    if (info.elo != null) prev.elo = info.elo;
+    if (info.winRate != null) prev.winRate = info.winRate;
+    if (info.category != null) prev.category = info.category;
+    if (info.matchCount != null) prev.matchCount = info.matchCount;
+    if (info.kd != null) prev.kd = info.kd;
+    const p = this.data.players[k];
+    if (p && p.names && p.names.length) prev.name = p.names[p.names.length - 1].name || prev.name;
+    else if (info.name) prev.name = String(info.name);
+    prev.at = Date.now();
+    this.data.playerSnapshots[k] = prev;
+    this._flush();
+  }
+
+  // 批量保存（一次 flush，供对局粗查循环用）
+  savePlayerSnapshots(list) {
+    if (!Array.isArray(list)) return;
+    let changed = false;
+    for (const it of list) {
+      if (!it || it.id == null || !it.info) continue;
+      const k = String(it.id);
+      const info = it.info;
+      const prev = this.data.playerSnapshots[k] || { id: k, name: '', elo: null, winRate: null, category: null, matchCount: null, kd: null, at: 0 };
+      if (info.elo != null) prev.elo = info.elo;
+      if (info.winRate != null) prev.winRate = info.winRate;
+      if (info.category != null) prev.category = info.category;
+      if (info.matchCount != null) prev.matchCount = info.matchCount;
+      if (info.kd != null) prev.kd = info.kd;
+      const p = this.data.players[k];
+      if (p && p.names && p.names.length) prev.name = p.names[p.names.length - 1].name || prev.name;
+      prev.at = Date.now();
+      this.data.playerSnapshots[k] = prev;
+      changed = true;
+    }
+    if (changed) this._flush();
+  }
+
+  // 读取某玩家的本地快照（可能为 null）
+  playerSnapshot(id) {
+    return this.data.playerSnapshots[String(id)] || null;
+  }
+
+  // 离线搜索：在「本地见过的玩家」里按 ID 前缀或任意名字子串匹配（不调用任何 API）
+  searchLocal(q, limit = 20) {
+    const query = String(q || '').trim().toLowerCase();
+    if (!query) return [];
+    const out = [];
+    const isNum = /^\d+$/.test(query);
+    for (const p of Object.values(this.data.players)) {
+      if (!p) continue;
+      if (isNum && String(p.id).startsWith(query)) {
+        const last = p.names && p.names.length ? p.names[p.names.length - 1].name : '';
+        out.push({ id: p.id, name: last || '', level: null, rating: null });
+        if (out.length >= limit) break;
+        continue;
+      }
+      const nameHit = (p.names || []).some((n) => String(n.name || '').toLowerCase().includes(query));
+      if (nameHit) {
+        const last = p.names[p.names.length - 1].name || '';
+        out.push({ id: p.id, name: last, level: null, rating: null });
+        if (out.length >= limit) break;
+      }
+    }
+    return out;
+  }
+
   _matchesForPlayer(id) {
     const pid = String(id);
     const out = [];
     for (const m of Object.values(this.data.matches)) {
-      if (m.players && m.players.some((p) => p.id === pid)) out.push(m);
+      if (m.players && m.players.some((p) => p.id != null && String(p.id) === pid)) out.push(m);
     }
     out.sort((a, b) => (b.endTime || b.firstSeenAt || 0) - (a.endTime || a.firstSeenAt || 0));
     return out;
@@ -312,9 +504,10 @@ class PlayerTracker {
 
   // 单场相遇（相对本机玩家）
   _encounter(m, targetId) {
-    const target = m.players.find((p) => p.id === String(targetId));
+    const target = m.players.find((p) => p.id != null && String(p.id) === String(targetId));
     if (!target) return null;
-    const local = this.data.localId ? m.players.find((p) => p.id === String(this.data.localId)) : null;
+    const local = this._pickLocalForMatch(m);
+    if (!local) return null; // 本局没有可识别的本机账号（如关闭联动后的旧账号局）→ 不计为相遇
     let rel = null;
     if (target.team === 'Spectators') rel = 'spec';
     else if (local && local.teamId != null && target.teamId != null) rel = (local.teamId === target.teamId) ? 'same' : 'opp';

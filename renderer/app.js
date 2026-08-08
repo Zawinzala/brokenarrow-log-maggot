@@ -40,17 +40,32 @@ function renderHeartbeat(h) {
   const el = $('onlineText');
   if (!el) return;
   if (h && h.online != null) {
-    el.textContent = `🟢 在线 ${h.online} 人`;
+    el.classList.add('ok'); el.classList.remove('err');
+    el.textContent = '● ' + h.online + ' 人正在使用';
     el.title = h.lastError
-      ? `上次心跳：${h.lastError}（自己可能没计入）`
-      : `上次心跳成功于 ${h.lastPing ? new Date(h.lastPing).toLocaleTimeString('zh-CN') : '-'}`;
+      ? '上次心跳：' + h.lastError + '（自己可能没计入）'
+      : '上次心跳成功于 ' + (h.lastPing ? new Date(h.lastPing).toLocaleTimeString('zh-CN') : '-') + (h.viaProxy ? '（经代理 ' + h.viaProxy + '）' : '');
   } else if (h && h.lastError) {
-    el.textContent = '🟡 心跳异常';
+    el.classList.remove('ok'); el.classList.add('err');
+    el.textContent = '● 心跳连接失败';
     el.title = h.lastError;
   } else {
-    el.textContent = '';
-    el.title = '';
+    el.classList.remove('ok', 'err');
+    el.textContent = '● 0 人正在使用';
+    el.title = '统计服务返回的当前在线用户数（可在设置里关闭）';
   }
+}
+// 顶栏：BATrace API 稳定性灯（绿=全通 / 黄=部分 / 红=全挂 / 灰=未检测）
+function renderApiHealth(d) {
+  const el = $('apiHealth');
+  if (!el) return;
+  if (!d || !d.state) { el.className = 'api-health unknown'; el.title = 'BATrace API 稳定性尚未检测（每小时自动检测一次）'; el.textContent = 'BATrace ●'; return; }
+  const map = { ok: ['ok', '🟢 API 全部可用'], partial: ['warn', '🟡 API 部分可用'], down: ['down', '🔴 API 全部不可用'] };
+  const pair = map[d.state] || ['unknown', 'API 状态未知'];
+  el.className = 'api-health ' + pair[0];
+  const detail = (d.checks || []).map((c) => (c.ok ? '✅ ' + c.label + '（' + c.ms + 'ms）' : '❌ ' + c.label + '（' + (c.status ? 'HTTP ' + c.status : '超时') + '）')).join('\n');
+  el.title = pair[1] + '（' + d.okCount + '/' + d.total + '）\n' + detail + '\n检测时间：' + (d.at ? fmtTime(d.at) : '-') + '\n每小时自动检测一次';
+  el.textContent = 'BATrace ●';
 }
 // 单选/多选增强：单击单选，Ctrl+单击多选
 // 多选增强：单击单选，Ctrl+单击多选，Shift+单击区间选择，Ctrl+A 全选
@@ -200,7 +215,10 @@ function playerCard(p) {
   const selfTag = selfName && p.name === selfName ? '<span class="pself">(我)</span>' : '';
   let statHtml = '';
   if (p.status === 'loading') statHtml = '<span class="loading">查询中…</span>';
-  else if (p.error) statHtml = `<span class="err">${esc(p.error)}</span>`;
+  else if (p.error) {
+    if (p.localSnapshot) statHtml = `<span class="dim">本地 ELO ${p.localSnapshot.elo ?? '-'}${p.localSnapshot.winRate != null ? ` · 胜率 ${p.localSnapshot.winRate}%` : ''}（离线，${fmtTime(p.localSnapshot.at)}）</span>`;
+    else statHtml = `<span class="err">${esc(p.error)}</span>`;
+  }
   else if (p.info) {
     const units = p.info.topUnits ? (p.info.topUnits.length > 18 ? p.info.topUnits.slice(0, 18) + '…' : p.info.topUnits) : '';
     statHtml = `
@@ -480,7 +498,7 @@ function renderMatchDetail(d) {
   const groupHtml = (title, list) => list.length ? `
     <div class="inv-section"><b>${title}（${list.length}）</b><div class="inv-list">${list.map((p) => {
       const delta = (p.oldRating != null && p.newRating != null) ? ` <span class="dim">ELO ${fmtDelta(Math.round((p.newRating - p.oldRating) * 10) / 10)}</span>` : '';
-      return `<div class="inv-item"><b>${esc(p.name || '未知')}</b><span class="dim">ID ${esc(p.id)}</span>${delta}</div>`;
+      return `<div class="inv-item" data-id="${esc(p.id)}" data-name="${esc(p.name || '')}" data-link="${PLAYER_URL(p.id)}" title="右键：调查羁绊 / 在 BATrace 打开"><b>${esc(p.name || '未知')}</b><span class="dim">ID ${esc(p.id)}</span>${delta}</div>`;
     }).join('')}</div></div>` : '';
   $('matchDetailBody').innerHTML = `
     <div class="inv-stats">
@@ -563,7 +581,7 @@ async function confirmBackup() {
   }
 }
 async function doSyncRestore() {
-  const ok = await askConfirm('确定把上一账号的全部卡组同步回前线吗？\n同名卡组将被覆盖');
+  const ok = await askConfirm('是否替换成换号前的上一局卡组包？\n同名卡组将被覆盖，原包仍保留在后勤仓库（上一局卡组包.zip）');
   if (!ok) return;
   try {
     const r = await BA.syncRestore();
@@ -595,11 +613,11 @@ function renderDeckSyncAlert(d) {
   if (!d) return;
   const el = $('deckSyncAlert');
   if (!el) return;
-  const c = $('syncCount');
-  if (c) c.textContent = d.count;
+  const f = $('syncFrom');
+  if (f) f.textContent = d.from || '';
   const ai = $('syncAccountInfo');
   if (ai) {
-    if (d.from && d.to) ai.textContent = '（' + d.from + ' → ' + d.to + '）';
+    if (d.to) ai.textContent = '（当前账号：' + d.to + '）';
     else ai.textContent = '';
   }
   el.classList.remove('hidden');
@@ -723,6 +741,8 @@ function openSettings() {
     $('setBanPoll').checked = !!cfg.banPollEnabled;
     $('setMatchSync').checked = !!cfg.matchSyncEnabled;
     $('setBanCard').checked = !!cfg.banCardVisible;
+    $('setMultiBond').checked = !!cfg.multiAccountBond;
+    refreshAccountList();
     savedTheme = cfg.theme || 'dark';
     setThemePicker(savedTheme);
     $('dirHint').textContent = '';
@@ -948,13 +968,23 @@ function renderInvestigate(p) {
       <div class="inv-item"><b>${esc(n.name)}</b><span class="dim">${fmtTime(n.firstSeen)} → ${fmtTime(n.lastSeen)}</span></div>`).join('')
     : '<span class="dim">暂无改名记录</span>';
   const info = p.info;
-  $('invInfo').innerHTML = info
-    ? eloHtml + '<br>' +
+  const snap = p.localSnapshot || null;
+  let infoHtml = eloHtml;
+  if (info) {
+    infoHtml = eloHtml + '<br>' +
       (info.kd != null ? ` <span>K/D ${info.kd}</span>` : '') +
       (info.winRate != null ? ` <span>胜率 ${info.winRate}%</span>` : '') +
       (info.category ? ` <span>偏好 ${esc(catLabel(info.category))}</span>` : '') +
-      (info.topUnits ? ` <span>最爱 ${esc(info.topUnits)}</span>` : '')
-    : eloHtml;
+      (info.topUnits ? ` <span>最爱 ${esc(info.topUnits)}</span>` : '');
+  } else if (snap) {
+    const bits = [];
+    if (snap.elo != null) bits.push('ELO <span class="elo">' + Math.round(snap.elo) + '</span>');
+    if (snap.winRate != null) bits.push('胜率 ' + snap.winRate + '%');
+    if (snap.matchCount != null) bits.push('样本 ' + snap.matchCount);
+    if (snap.category) bits.push('偏好 ' + esc(catLabel(snap.category)));
+    infoHtml = eloHtml + '<br><span class="dim">本地快照 · ' + fmtTime(snap.at) + '：</span> ' + (bits.length ? bits.join(' ') : '暂无');
+  }
+  $('invInfo').innerHTML = infoHtml;
 }
 
 // ---------- 封禁追踪 ----------
@@ -1043,6 +1073,38 @@ function renderCheaters(list) {
       item.appendChild(div);
     });
   });
+}
+
+// ---------- 账号数据管理（多账号联动） ----------
+async function refreshAccountList() {
+  const el = $('accountList');
+  if (!el) return;
+  try {
+    const r = await BA.listAccounts();
+    const list = (r && r.list) || [];
+    if (!list.length) { el.innerHTML = '<span class="dim">暂无本机账号记录（打过对局后自动出现）。</span>'; return; }
+    el.innerHTML = list.map((a) =>
+      '<div class="account-item">' +
+      '<b>' + esc(a.persona || a.name || ('账号 ' + a.id)) + '</b>' +
+      '<span class="dim">ID ' + esc(a.id) + '</span>' +
+      '<span class="dim">' + a.matchCount + ' 场</span>' +
+      '<button class="btn btn-danger btn-xs" data-del="' + esc(a.id) + '">🗑 删除</button>' +
+      '</div>').join('');
+    el.querySelectorAll('[data-del]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const id = btn.dataset.del;
+        const ok = await askConfirm('确定删除账号 ' + id + ' 的全部数据吗？\n将删除该账号的对局/相遇记录，并清理其卡组归档文件夹。此操作不可恢复。');
+        if (!ok) return;
+        try {
+          const r = await BA.deleteAccount(id);
+          setStatus((r && r.message) || '已删除', !!(r && r.ok));
+          refreshAccountList();
+        } catch (e) { setStatus('删除失败：' + e.message, false); }
+      });
+    });
+  } catch (e) {
+    el.innerHTML = '<span class="dim">读取账号列表失败：' + esc(e.message) + '</span>';
+  }
 }
 
 // ---------- 主题 ----------
@@ -1194,9 +1256,10 @@ function bindUI() {
     try {
       const data = await BA.searchPlayers(q);
       const list = data.players || [];
-      $('searchResults').innerHTML = list.length
+      const offlineNote = data.offline ? '<div class="dim">⚠ 离线：以下为本地见过的玩家匹配（API 不可用）</div>' : '';
+      $('searchResults').innerHTML = offlineNote + (list.length
         ? list.map((p) => `<span class="chip" data-id="${p.id}" data-name="${esc(p.name)}" data-link="${PLAYER_URL(p.id)}">${esc(p.name)}<span class="s-id">ID ${esc(p.id)}</span><span class="s-lv">Lv.${p.level ?? '?'}</span><span class="s-elo">${p.rating != null ? Math.round(p.rating) : '?'}</span></span>`).join('')
-        : '<span class="dim">未找到玩家</span>';
+        : (data.offline ? '<span class="dim">本地未找到见过该玩家</span>' : '<span class="dim">未找到玩家</span>'));
       document.querySelectorAll('.chip').forEach((el) => {
         el.addEventListener('click', () => loadReport(el.dataset.id, el.dataset.name));
       });
@@ -1272,6 +1335,7 @@ async function saveSettings() {
     banPollEnabled: $('setBanPoll').checked,
     matchSyncEnabled: $('setMatchSync').checked,
     banCardVisible: $('setBanCard').checked,
+    multiAccountBond: $('setMultiBond').checked,
     theme: currentTheme
   });
   savedTheme = currentTheme;
@@ -1354,6 +1418,8 @@ async function init() {
   BA.getUsage().then(renderBudget).catch(() => {});
   BA.onHeartbeat(renderHeartbeat);
   BA.getHeartbeat().then(renderHeartbeat).catch(() => {});
+  BA.onApiHealth(renderApiHealth);
+  BA.getApiHealth().then(renderApiHealth).catch(() => {});
   BA.getBans().then(renderBans).catch(() => {});
   BA.onBansChanged((d) => { if (banView === 'met') { banView = 'all'; const btn = $('btnBanCheaters'); if (btn) btn.textContent = '🔍 我遇到过的作弊者'; } renderBans(d && d.list); });
   BA.onBanAlert(renderBanAlert);

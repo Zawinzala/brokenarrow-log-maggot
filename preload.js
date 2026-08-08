@@ -38,6 +38,8 @@ contextBridge.exposeInMainWorld('api', {
   getHeartbeat: () => ipcRenderer.invoke('heartbeat:get'),
   pingHeartbeat: (url) => ipcRenderer.invoke('heartbeat:ping', url),
   onHeartbeat: (cb) => ipcRenderer.on('heartbeat', (e, d) => cb(d)),
+  getApiHealth: () => ipcRenderer.invoke('api:health'),
+  onApiHealth: (cb) => ipcRenderer.on('api:health', (e, d) => cb(d)),
 
   // 档案
   getArchive: () => ipcRenderer.invoke('archive:list'),
@@ -56,6 +58,8 @@ contextBridge.exposeInMainWorld('api', {
   onBansChanged: (cb) => ipcRenderer.on('bans:changed', (e, d) => cb(d)),
   onBanAlert: (cb) => ipcRenderer.on('bans:alert', (e, d) => cb(d)),
   getCheaters: () => ipcRenderer.invoke('tracker:cheaters'),
+  listAccounts: () => ipcRenderer.invoke('tracker:listAccounts'),
+  deleteAccount: (id) => ipcRenderer.invoke('tracker:deleteAccount', id),
   onMatchesChanged: (cb) => ipcRenderer.on('matches:changed', (e, d) => cb(d)),
 
   // 外部链接

@@ -33,6 +33,7 @@ function registerStubIpc() {
   handle('deck:openFolder', () => true);
   handle('usage:get', () => ({ used24h: 0, limit24h: 120, calls: 0 }));
   handle('heartbeat:get', () => null);
+  handle('api:health', () => ({ state: 'ok', checks: [{ path: '/api/units', label: '单位库', ok: true, ms: 80 }], at: Date.now(), okCount: 4, total: 4 }));
   handle('heartbeat:ping', () => null);
   handle('app:version', () => null);
   handle('report:maggot', () => ({ error: 'smoke' }));
@@ -41,6 +42,8 @@ function registerStubIpc() {
   handle('tracker:getBans', () => ({ list: [], lastSync: 0 }));
   handle('tracker:syncBans', () => ({ list: [], lastSync: 0 }));
   handle('tracker:matches', () => ({ list: [] }));
+  handle('tracker:listAccounts', () => ({ list: [{ id: '8863', name: 'Zola', persona: 'Zola', matchCount: 3 }] }));
+  handle('tracker:deleteAccount', (e, id) => ({ ok: true, message: 'smoke deleted ' + id }));
   handle('tracker:matchDetail', () => null);
   handle('shell:open', () => true);
 }
@@ -82,6 +85,10 @@ app.whenReady().then(async () => {
         const modal = document.getElementById('settingsModal');
         out.settingsOpened = !modal.classList.contains('hidden');
         out.setLogDirValue = document.getElementById('setLogDir').value;
+        out.accountListText = (document.getElementById('accountList') || {}).textContent || '';
+        out.multiBondChecked = (document.getElementById('setMultiBond') || {}).checked;
+        out.apiHealthClass = (document.getElementById('apiHealth') || {}).className;
+        out.apiHealthText = (document.getElementById('apiHealth') || {}).textContent;
         // 点卡组刷新
         const before = document.getElementById('deckFront').options.length;
         document.getElementById('btnDeckRefresh').click();

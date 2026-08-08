@@ -1,11 +1,16 @@
-// ================= 卡组自动同步（v4，按登录玩家名） =================
-// v3 用日志里的“storage 哈希”当账号身份，实测该哈希对同一台机器恒定、
-// 不随 Steam 账号变化，导致换号永不触发。v4 改用日志里的登录玩家名：
-//   - 玩家名变 = 切换了 Steam 账号 → 提醒（与卡组内容无关）。
-//   - 快照按账号分文件夹归档 DeckSync/<玩家名>/，来回切号互不覆盖。
-//   - 同一账号会话内持续滚动镜像，游戏内改卡组也能跟上。
+// ================= 卡组「上一局卡组包」唯一自动备份（v5） =================
+// v5 与 v4 的核心差异：
+//   - 不再按账号分文件夹镜像归档（DeckSync/<账号>/ 不再写入；旧文件夹保留磁盘，
+//     仅「删除账号数据」时按需清理）。
+//   - 只有唯一一个旋转包 DeckBackups/上一局卡组包.zip：每局游戏开始（matchStart，
+//     非回放）自动用当前前线卡组覆盖它；换号后即使不点替换，打一把也会覆盖成新号卡组。
+//   - 替换提醒：当「上一局卡组包」属于换号前的账号且本局尚未覆盖时，提醒一次/对，
+//     文案「是否替换成换号前（ID：XXX）的上一局的卡组包？」；对局开始覆盖包后自然不再提醒。
 const fs = require('fs');
 const path = require('path');
+const { zipCreate, zipExtract } = require('./zip');
+
+const PKG_NAME = '上一局卡组包.zip';
 
 function isDeck(f) { return typeof f === 'string' && f.toLowerCase().endsWith('.dek'); }
 
@@ -16,9 +21,21 @@ function listDeckNames(dir) {
   } catch (e) { return []; }
 }
 
-function setKey(names) { return Array.from(names).sort().join('|'); }
+// 纯文件名安全校验（与 main.js 一致：不允许路径分隔符/上级目录）
+function safeFileName(name) {
+  if (typeof name !== 'string' || !name) return null;
+  const base = path.basename(name);
+  if (base !== name || name.includes('..') || /[\\/]/.test(name)) return null;
+  return base;
+}
 
-// 目录内容指纹（文件名+大小+修改时间），用于避免每次都做镜像
+// 玩家名 → 安全文件夹名（去路径分隔符/保留字，限长，空则 unknown）
+function sanitizeAccount(name) {
+  const s = String(name || '').trim().replace(/[\\/:*?"<>|]/g, '_').replace(/[\u0000-\u001f]/g, '').slice(0, 60);
+  return s || 'unknown';
+}
+
+function setKey(names) { return Array.from(names).sort().join('|'); }
 function sigKey(dir) {
   return listDeckNames(dir)
     .map((f) => {
@@ -31,19 +48,13 @@ function sigKey(dir) {
     .join('|');
 }
 
-// 玩家名 → 安全文件夹名（去路径分隔符/保留字，限长，空则 unknown）
-function sanitizeAccount(name) {
-  const s = String(name || '').trim().replace(/[\\/:*?"<>|]/g, '_').replace(/[\u0000-\u001f]/g, '').slice(0, 60);
-  return s || 'unknown';
-}
-
 // createDeckSync({ getDirs, getSession, getStateFile })
-//   getDirs:       () => ({ decks, sync, found })
+//   getDirs:       () => ({ decks, backups, sync, found })
 //   getSession:    () => ({ key, name, loginSeen })  key = 账号身份（persona:<玩家名>）或 null
-//   getStateFile:  () => 状态文件路径（持久化“当前账号”）
+//   getStateFile:  () => 状态文件路径（持久化“上一局卡组包”归属与提醒对）
 function createDeckSync({ getDirs, getSession, getStateFile } = {}) {
   if (typeof getDirs !== 'function') throw new Error('deckSync: getDirs required');
-  const state = { key: '', name: '', alertedKey: '', lastMirrorKey: '' };
+  const state = { pkgKey: '', pkgName: '', pkgFid: null, pkgUpdatedAt: 0, alertedPairs: [] };
 
   function loadState() {
     try {
@@ -51,9 +62,12 @@ function createDeckSync({ getDirs, getSession, getStateFile } = {}) {
       const f = getStateFile();
       if (f && fs.existsSync(f)) {
         const raw = JSON.parse(fs.readFileSync(f, 'utf8'));
-        if (raw && typeof raw.key === 'string') {
-          // v4 迁移：只接受 persona: 前缀的 key，旧的哈希 key 直接丢弃（首启采纳当前账号）
-          if (raw.key.startsWith('persona:')) { state.key = raw.key; state.name = raw.name || ''; }
+        if (raw && typeof raw === 'object') {
+          if (raw.pkgKey != null) state.pkgKey = raw.pkgKey;
+          if (raw.pkgName != null) state.pkgName = raw.pkgName;
+          if (raw.pkgFid != null) state.pkgFid = raw.pkgFid;
+          if (raw.pkgUpdatedAt != null) state.pkgUpdatedAt = raw.pkgUpdatedAt;
+          if (Array.isArray(raw.alertedPairs)) state.alertedPairs = raw.alertedPairs;
         }
       }
     } catch (e) {}
@@ -64,120 +78,90 @@ function createDeckSync({ getDirs, getSession, getStateFile } = {}) {
       const f = getStateFile();
       if (!f) return;
       fs.mkdirSync(path.dirname(f), { recursive: true });
-      fs.writeFileSync(f, JSON.stringify({ key: state.key, name: state.name, savedAt: Date.now() }), 'utf8');
+      fs.writeFileSync(f, JSON.stringify({ pkgKey: state.pkgKey, pkgName: state.pkgName, pkgFid: state.pkgFid, pkgUpdatedAt: state.pkgUpdatedAt, alertedPairs: state.alertedPairs }, null, 2), 'utf8');
     } catch (e) {}
   }
 
-  // 某账号的归档目录 = DeckSync/<安全玩家名>
-  function archiveDir(sync, key) {
-    const persona = String(key || '').replace(/^persona:/, '');
-    return path.join(sync, sanitizeAccount(persona));
+  function pkgPath() {
+    const { backups } = getDirs();
+    return path.join(backups, PKG_NAME);
   }
 
-  // 把 Decks 完整镜像到指定归档（清空旧的，复制当前的）
-  function mirror(decks, archive) {
-    try { fs.mkdirSync(archive, { recursive: true }); } catch (e) { return; }
-    for (const f of listDeckNames(archive)) {
-      try { fs.unlinkSync(path.join(archive, f)); } catch (e) {}
-    }
-    let n = 0;
-    for (const f of listDeckNames(decks)) {
-      try { fs.copyFileSync(path.join(decks, f), path.join(archive, f)); n++; } catch (e) {}
-    }
-    state.lastMirrorKey = sigKey(decks);
-    return n;
+  // 包内 .dek 名单（读 zip；只在一对提醒时调用一次，频率很低）
+  function pkgEntries() {
+    try {
+      const p = pkgPath();
+      if (!fs.existsSync(p)) return [];
+      return zipExtract(fs.readFileSync(p))
+        .map((en) => safeFileName(en.name))
+        .filter((f) => f && isDeck(f));
+    } catch (e) { return []; }
   }
 
-  function init() {
-    loadState();
-    state.alertedKey = '';
-    state.lastMirrorKey = '';
+  function init() { loadState(); }
+
+  // 每局开始：用当前前线卡组覆盖唯一「上一局卡组包」；Decks 缺失/为空则跳过
+  function onMatchStart({ fid } = {}) {
+    const { decks, backups, found } = getDirs();
+    if (!found) return { ok: false, reason: 'nodecks' };
+    const names = listDeckNames(decks);
+    if (!names.length) return { ok: false, reason: 'empty' };
+    try {
+      fs.mkdirSync(backups, { recursive: true });
+      const files = names.map((f) => ({ name: f, data: fs.readFileSync(path.join(decks, f)) }));
+      fs.writeFileSync(pkgPath(), zipCreate(files));
+    } catch (e) { return { ok: false, reason: String(e && e.message || e) }; }
+    const session = typeof getSession === 'function' ? getSession() : null;
+    state.pkgKey = (session && session.key) || state.pkgKey;
+    state.pkgName = (session && session.name) || state.pkgName;
+    state.pkgFid = fid != null ? String(fid) : state.pkgFid;
+    state.pkgUpdatedAt = Date.now();
+    state.alertedPairs = []; // 新基线：换号前的包已被本局覆盖，不再提醒
+    saveState();
+    return { ok: true, count: names.length };
   }
 
-  // 周期检测：返回提醒数据或 null
+  // 周期检测：包属于换号前账号且本局尚未覆盖 → 提醒一次/对
   function check() {
-    const { decks, sync, found } = getDirs();
+    const { found } = getDirs();
     if (!found) return null;
     const session = typeof getSession === 'function' ? getSession() : null;
     const k = session && session.key;
     if (!k) return null; // 无可识别的账号会话（游戏未运行/日志无玩家名）→ 不动
-
-    const archive = archiveDir(sync, k);
-
-    if (!state.key) {
-      // 首启/升级迁移：采纳当前账号，建立该账号归档
-      mirror(decks, archive);
-      state.key = k;
-      state.name = session.name || '';
-      saveState();
-      return null;
-    }
-
-    if (state.key !== k) {
-      // 账号切换：冻结并提醒一次（同一对账号只提醒一次）
-      const pair = state.key + '>' + k;
-      if (state.alertedKey !== pair) {
-        state.alertedKey = pair;
-        const prevArchive = archiveDir(sync, state.key);
-        const names = listDeckNames(prevArchive);
-        return { count: names.length, names: names.slice(0, 40), from: state.name, to: session.name || '' };
-      }
-      return null;
-    }
-
-    // 同一账号会话：滚动镜像（内容变化才写）
-    if (state.lastMirrorKey !== sigKey(decks)) {
-      mirror(decks, archive);
-    }
-    state.name = session.name || '';
+    if (!state.pkgKey || state.pkgKey === k) return null; // 无包 / 包属于当前账号 → 不提醒
+    if (!fs.existsSync(pkgPath())) return null; // 包已被删除 → 无从替换
+    const pair = state.pkgKey + '>' + k;
+    if (state.alertedPairs.includes(pair)) return null; // 同一对只提醒一次
+    state.alertedPairs.push(pair);
+    const names = pkgEntries();
     saveState();
-    state.alertedKey = '';
-    return null;
+    return { count: names.length, names: names.slice(0, 40), from: state.pkgName || state.pkgKey, to: session.name || '', pkgFid: state.pkgFid, pair };
   }
 
-  // 一键同步回来：把上一账号归档全部复制回前线（同名覆盖），随后采纳当前账号
-  function restoreAll() {
-    const { decks, sync } = getDirs();
-    const session = typeof getSession === 'function' ? getSession() : null;
-    const k = session && session.key;
-    if (!k) return 0;
+  // 替换：把「上一局卡组包」写回前线（同名覆盖）；不更新包本身
+  function replaceAll() {
+    const { decks, found } = getDirs();
+    if (!found) return 0;
+    const p = pkgPath();
+    if (!fs.existsSync(p)) return 0;
     let count = 0;
-    if (state.key && state.key !== k) {
-      const prevArchive = archiveDir(sync, state.key);
-      for (const f of listDeckNames(prevArchive)) {
-        try { fs.copyFileSync(path.join(prevArchive, f), path.join(decks, f)); count++; } catch (e) {}
+    try {
+      const entries = zipExtract(fs.readFileSync(p));
+      for (const en of entries) {
+        const fn = safeFileName(en.name);
+        if (!fn || !isDeck(fn)) continue;
+        fs.writeFileSync(path.join(decks, fn), en.data);
+        count++;
       }
-    }
-    const archive = archiveDir(sync, k);
-    mirror(decks, archive);
-    state.key = k;
-    state.name = session.name || '';
-    saveState();
-    state.alertedKey = '';
+    } catch (e) { return count; }
     return count;
   }
 
-  // 忽略本次切换：采纳当前账号为基线（上一账号归档保留在磁盘，不删除）
-  function ignore() {
-    const { decks, sync } = getDirs();
-    const session = typeof getSession === 'function' ? getSession() : null;
-    const k = session && session.key;
-    if (!k) return;
-    mirror(decks, archiveDir(sync, k));
-    state.key = k;
-    state.name = session.name || '';
-    saveState();
-    state.alertedKey = '';
-  }
+  // 忽略/关闭提醒：仅保证同一对不再提醒（check 已记录 pair，无需额外动作）
+  function ignore() { return true; }
+  function dismiss() { return true; }
 
-  // 仅关闭提醒：不动任何归档
-  function dismiss() {
-    const session = typeof getSession === 'function' ? getSession() : null;
-    const k = session && session.key;
-    if (state.key && k) state.alertedKey = state.key + '>' + k;
-  }
-
-  return { state, init, check, restoreAll, ignore, dismiss, syncFileNames: listDeckNames };
+  return { state, init, check, onMatchStart, replaceAll, ignore, dismiss, pkgName: () => PKG_NAME, syncFileNames: listDeckNames };
 }
 
 module.exports = { createDeckSync, listDeckNames, setKey, sigKey, sanitizeAccount };

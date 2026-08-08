@@ -1,5 +1,5 @@
 // ================= Electron 主进程 =================
-const { app, BrowserWindow, ipcMain, dialog, shell, Notification } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, Notification, net } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -9,9 +9,10 @@ const { LogParser } = require('./src/logParser');
 const { LogWatcher } = require('./src/logWatcher');
 const { BatraceClient, Cache, ApiUsage } = require('./src/batrace');
 const { Heartbeat } = require('./src/heartbeat');
+const { ApiHealth } = require('./src/apiHealth');
 const { ApmTracker } = require('./src/apm');
 const inputHook = require('./src/inputHook');
-const { createDeckSync } = require('./src/deckSync');
+const { createDeckSync, sanitizeAccount } = require('./src/deckSync');
 const { spawn } = require('child_process');
 const { Analyzer, mapName } = require('./src/analyzer');
 const { MatchArchive } = require('./src/storage');
@@ -34,6 +35,7 @@ let inputHookOk = false; // 输入钩子是否可用
 let tracker = null;      // 玩家追踪库
 let banTimer = null;     // 封禁检查定时器
 let matchTimer = null;   // 本机对局同步定时器
+let apiHealth = null;    // API 稳定性健康检查（顶栏三色灯）
 
 // 软件图标：优先使用 build/icon.png（由根目录 logo.png 生成），否则用默认
 function appIcon() {
@@ -88,17 +90,21 @@ app.whenReady().then(() => {
   analyzer = new Analyzer(client);
   archive = new MatchArchive(path.join(app.getPath('userData'), 'match-archive.json'));
   tracker = new PlayerTracker(path.join(app.getPath('userData'), 'players-db.json'));
+  tracker.setMultiAccountBond(!!config.get().multiAccountBond);
   apm = new ApmTracker();
   focusWatcher = new FocusWatcher();
   inputHook.onEvent(() => {
     // 只统计“对局进行中 + 游戏窗口在前台”的输入；钩子按需在 matchStart 时启动
     if (apm && apm.active && focusWatcher.isFocused()) apm.feedInput();
   });
+  apiHealth = new ApiHealth({ file: path.join(app.getPath('userData'), 'api-health.json') });
   heartbeat = new Heartbeat({
     url: config.get().heartbeatUrl || '',
     uidFile: path.join(app.getPath('userData'), 'heartbeat-uid.txt'),
     version: app.getVersion(),
-    onStats: (stats) => send('heartbeat', stats)
+    onStats: (stats) => send('heartbeat', stats),
+    // 用 Electron net.fetch：走系统代理/HTTP3，与浏览器行为一致（Node fetch 不走系统代理，国内易超时）
+    fetchImpl: (u, o) => net.fetch(u, o)
   });
   if (config.get().heartbeatEnabled && heartbeat.url) heartbeat.start();
 
@@ -121,6 +127,8 @@ app.whenReady().then(() => {
   checkVersion();
   startSyncTimers();
   send('budget', budgetPayload({}));
+  // API 稳定性灯：仅每小时检测一次（不启动即探，避免频繁请求）
+  setInterval(() => probeApiHealth(), 3600 * 1000);
 });
 
 app.on('window-all-closed', () => {
@@ -205,6 +213,13 @@ function onParserEvent(type, data) {
         send('apm:start', { available: true, map: data.map, fid: data.fid });
       }
     }
+    // 每局开始：用当前前线卡组覆盖唯一「上一局卡组包」（仅实时日志，回放不覆盖）
+    if (!isReplayLog()) {
+      try {
+        const r = deckSync.onMatchStart({ fid: data.fid });
+        if (r && r.ok) send('deck:changed', { reason: 'match-start' });
+      } catch (e) {}
+    }
   } else if (type === 'matchEnd') {
     stopApmTimer();
     if (focusWatcher) focusWatcher.stop();
@@ -224,8 +239,9 @@ function onParserEvent(type, data) {
       send('apm:idle', {});
     }
     archive.add(data);
-    tracker.recordLogMatch({ ...data, localName: parser.snapshot().localName });
+    tracker.recordLogMatch({ ...data, localName: parser.snapshot().localName, accountKey: parser.snapshot().accountKey });
     send('archive:changed', archive.list().slice(0, 20));
+    send('matches:changed', { list: matchSummary() }); // 上一局/对局档案即时刷新
     send('session', parser.snapshot());
   } else if (type === 'matchMeta') {
     // 补记时长（网络统计行在对局结束后才出现）
@@ -271,6 +287,7 @@ function budgetPayload(extra = {}) {
     calls: client ? (client.networkCalls || 0) : 0,
     used24h: usage ? usage.count() : 0,
     limit24h: usage ? usage.limit : 120,
+    healthCalls: apiHealth ? apiHealth.healthCalls : 0,
     ...extra
   };
 }
@@ -346,20 +363,25 @@ async function queryCurrentMatch(rosterOverride) {
   const capped = players.slice(0, 20);
   const skipped = roster.length - capped.length;
   send('match:querying', { fid, players: capped, skipped, prev: isPrev });
+  const snapshots = [];
   let done = 0;
   for (const p of capped) {
     const row = { id: p.id, name: p.name, team: p.team, info: null, error: null };
     try {
       const a = await client.analysisPlayer(p.id);
       const mini = analyzer.extractMini(a);
-      if (mini) row.info = mini; else row.error = '无数据';
+      if (mini) { row.info = mini; snapshots.push({ id: p.id, info: mini }); }
+      else row.error = '无数据';
     } catch (e) {
       row.error = '查询失败';
+      const snap = tracker.playerSnapshot(p.id);
+      if (snap) row.localSnapshot = snap; // 离线时用本地快照兜底显示
     }
     done++;
     send('match:player', { ...row, prev: isPrev });
     send('budget', budgetPayload({ done, total: capped.length, skipped }));
   }
+  if (snapshots.length) tracker.savePlayerSnapshots(snapshots); // 批量落盘一次
   send('match:done', { fid, count: capped.length, prev: isPrev });
   send('budget', budgetPayload({ done: capped.length, total: capped.length, skipped, finished: true }));
 }
@@ -425,11 +447,11 @@ function cheatersList() {
 // 取最近一场对局里的某个非本机玩家（测试封禁提醒模拟用）
 function pickEncounteredPlayer() {
   if (!tracker) return null;
-  const lid = tracker.data.localId;
+  const localIds = tracker.localIds();
   const matches = Object.values(tracker.data.matches).sort((a, b) => (b.endTime || b.firstSeenAt || 0) - (a.endTime || a.firstSeenAt || 0));
   for (const m of matches) {
     for (const p of m.players || []) {
-      if (lid && String(p.id) === String(lid)) continue;
+      if (p.id != null && localIds.includes(String(p.id))) continue;
       if (p.id != null) return { id: String(p.id), name: p.name || '' };
     }
   }
@@ -443,13 +465,15 @@ async function syncMyMatches() {
   try {
     const res = await client.playerMatchesRecent(lid, 10);
     const list = (res && Array.isArray(res.matches)) ? res.matches : [];
+    let msg = '同步完成（没有新对局）';
     if (list.length) {
       const r = tracker.upsertApiMatches(list);
       await backfillMissingWinners(list);
-      send('matches:changed', { list: matchSummary() });
-      return { ok: true, message: `同步完成：新增 ${r.added.length} 局、更新 ${r.updated.length} 局` };
+      msg = `同步完成：新增 ${r.added.length} 局、更新 ${r.updated.length} 局`;
     }
-    return { ok: true, message: '同步完成（没有新对局）' };
+    await backfillPendingWinners(); // 补纯日志局的胜负（players/matches 可能尚未收录）
+    send('matches:changed', { list: matchSummary() });
+    return { ok: true, message: msg };
   } catch (e) {
     return { ok: false, message: '同步失败：' + (e && e.message || e) };
   }
@@ -518,6 +542,25 @@ function matchDetail(fid) {
     custom: m.custom,
     players: (m.players || []).map((p) => ({ id: p.id, name: p.name, team: p.team, teamId: p.teamId, oldRating: p.oldRating, newRating: p.newRating }))
   };
+}
+
+// 补纯日志局胜负：本地 matches 里 localWon==null 的局（最多 20/小时），用 analysis/match 推导
+async function backfillPendingWinners() {
+  if (!client || !tracker) return;
+  const pending = [];
+  for (const m of Object.values(tracker.data.matches)) {
+    if (m.localWon == null && m.fid && /^\d+$/.test(m.fid)) pending.push(m);
+  }
+  pending.sort((a, b) => (b.endTime || b.firstSeenAt || 0) - (a.endTime || a.firstSeenAt || 0));
+  let changed = 0;
+  for (const m of pending.slice(0, 20)) {
+    try {
+      const am = await client.analysisMatchNoCount(m.fid);
+      const wt = winnerTeamFromMatch(am);
+      if (wt != null && tracker.setMatchWinner(m.fid, wt) != null) changed++;
+    } catch (e) { /* 单局失败跳过 */ }
+  }
+  return changed;
 }
 
 // 玩家调查档案（相遇/胜负/改名史/封禁 + 最新 ELO + 最近 10 局 + 情报）
@@ -610,11 +653,23 @@ async function buildProfile(pid) {
     const mini = analyzer.extractMini(a);
     if (mini) {
       out.info = { kd: mini.kd, winRate: mini.winRate, matchCount: mini.matchCount, category: mini.category, topUnits: mini.topUnits };
+      tracker.savePlayerSnapshot(id, mini);
     }
   } catch (e) { out.info = null; }
+  out.localSnapshot = tracker.playerSnapshot(id) || null; // 离线兜底：上次已知情报
   const afterCalls = client ? (client.networkCalls || 0) : 0;
   out.fromCache = (afterCalls === beforeCalls); // 本次调查是否纯缓存命中
   return out;
+}
+
+// ---------------- API 稳定性灯 ----------------
+async function probeApiHealth() {
+  if (!apiHealth) return null;
+  try {
+    const r = await apiHealth.probe();
+    send('api:health', r);
+    return r;
+  } catch (e) { return null; }
 }
 
 // ---------------- 软件版本检查（从用户 GitHub 的 version.txt 读取） ----------------
@@ -668,6 +723,7 @@ function registerIpc() {
     if (next.apiDailyLimit !== before.apiDailyLimit && usage) {
       usage.limit = next.apiDailyLimit ?? 120;
     }
+    if (tracker) tracker.setMultiAccountBond(!!next.multiAccountBond);
     // 输入钩子开关：关闭时立即停止全局钩子（反作弊最稳妥）
     if (next.inputHookEnabled !== before.inputHookEnabled) {
       if (!next.inputHookEnabled && inputHook) inputHook.stop();
@@ -696,12 +752,17 @@ function registerIpc() {
   ipcMain.handle('watcher:status', () => watcher.status());
   ipcMain.handle('session:get', () => parser.snapshot());
 
-  ipcMain.handle('search:players', (e, q) => {
-    return client.searchPlayers(q || '', 20).then((res) => {
+  ipcMain.handle('search:players', async (e, q) => {
+    const query = String(q || '').trim();
+    try {
+      const res = await client.searchPlayers(query, 20);
       const list = (res && res.players) || [];
       for (const p of list) if (p && p.id != null) tracker.observe(p.id, p.name);
       return res;
-    });
+    } catch (err) {
+      // API 不可用 → 离线兜底：本地见过的玩家匹配
+      return { players: tracker.searchLocal(query, 20), offline: true, offlineReason: String(err && err.message || err) };
+    }
   });
   ipcMain.handle('report:player', async (e, stbid) => {
     const r = await analyzer.buildReport(stbid);
@@ -715,8 +776,9 @@ function registerIpc() {
   });
   ipcMain.handle('app:version', () => versionInfo || null);
   ipcMain.handle('usage:get', () => (usage ? { used24h: usage.count(), limit24h: usage.limit, calls: client ? client.networkCalls || 0 : 0 } : null));
-  ipcMain.handle('heartbeat:get', () => (heartbeat ? heartbeat.stats : null));
+  ipcMain.handle('heartbeat:get', () => (heartbeat ? heartbeat.status() : null));
   ipcMain.handle('heartbeat:ping', (e, url) => (heartbeat ? heartbeat.pingNow(url) : null));
+  ipcMain.handle('api:health', () => (apiHealth ? apiHealth.last : null));
   ipcMain.handle('match:queryCurrent', () => queryCurrentMatch());
   ipcMain.handle('match:queryRoster', (e, players) => queryCurrentMatch(players));
   ipcMain.handle('match:syncNow', () => syncMyMatches());
@@ -730,6 +792,25 @@ function registerIpc() {
   ipcMain.handle('tracker:matches', () => ({ list: matchSummary() }));
   ipcMain.handle('tracker:cheaters', () => ({ list: cheatersList() }));
   ipcMain.handle('tracker:matchDetail', (e, fid) => matchDetail(fid));
+  ipcMain.handle('tracker:listAccounts', () => ({ list: tracker ? tracker.listAccounts() : [] }));
+  ipcMain.handle('tracker:deleteAccount', (e, id) => {
+    if (!tracker || id == null) return { ok: false, message: '参数无效' };
+    const r = tracker.deleteAccount(String(id));
+    if (r.persona) {
+      // 清理该账号的卡组归档文件夹（旧版本遗留 DeckSync/<账号>/）
+      try {
+        const { sync } = deckPaths();
+        const dir = path.join(sync, sanitizeAccount(r.persona));
+        if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
+      } catch (e) {}
+    }
+    send('matches:changed', { list: matchSummary() });
+    send('session', parser.snapshot());
+    let msg = '已删除账号 ' + String(id) + '（移除 ' + r.removedMatches + ' 场对局';
+    if (r.persona) msg += '，并清理其卡组归档';
+    msg += '）';
+    return { ok: true, message: msg, removedMatches: r.removedMatches };
+  });
   ipcMain.handle('tracker:syncBans', async () => {
     const newly = await syncBanList();
     return { list: tracker.listBans(), lastSync: tracker.data.lastBanSync, newly };
@@ -868,15 +949,15 @@ function registerDeckIpc() {
 
   // 把同步快照（上次账号卡组）全部同步回前线，同名覆盖
   ipcMain.handle('deck:syncRestore', () => {
-    const count = deckSync.restoreAll();
+    const count = deckSync.replaceAll();
     if (count > 0) send('deck:changed', { reason: 'sync-restore' });
-    return { ok: count > 0, message: count > 0 ? `已同步 ${count} 个卡组到前线（同名已覆盖）` : '上一账号没有可同步的卡组', count };
+    return { ok: count > 0, message: count > 0 ? `已替换为上一局卡组包（${count} 个卡组，同名覆盖）` : '上一局卡组包不存在或为空', count };
   });
 
   // 忽略本次切换：把当前账号卡组存为新的同步快照（覆盖旧快照）
   ipcMain.handle('deck:syncIgnore', () => {
     deckSync.ignore();
-    return { ok: true, message: '已忽略，以当前账号卡组为新基线（旧账号归档已保留）' };
+    return { ok: true, message: '已忽略，保留当前卡组（上一局卡组包仍保留在后勤仓库）' };
   });
 
   // 关闭提醒：同一份快照不再重复提醒（不改动快照）

@@ -26,6 +26,8 @@ const DEFAULTS = {
   matchSyncEnabled: true,
   // 封禁追踪卡片默认隐藏（设置里勾选才显示）
   banCardVisible: false,
+  // 多账号联动羁绊检查：换号也视为同一人，所有本机账号的对局都计入调查统计（默认开）
+  multiAccountBond: true,
   heartbeatUrl: 'https://heartbeat-service.zawin-zala.workers.dev',
   // 玩家报告使用的近期对局页数（每页 5 局）
   reportMatchPages: 4,

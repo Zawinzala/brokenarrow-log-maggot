@@ -1,6 +1,6 @@
 {
   "name": "broken-arrow-log-assistant",
-  "version": "3.2.0",
+  "version": "3.3.0",
   "description": "断箭蛆工具 byZola - 基于 GameLogs 日志监听与 BATrace 数据查询的本地辅助工具",
   "main": "main.js",
   "scripts": {
