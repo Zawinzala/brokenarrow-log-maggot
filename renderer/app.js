@@ -10,7 +10,8 @@ function fmtDuration(sec) {
   if (sec == null) return '-';
   return `${Math.floor(sec / 60)}分${sec % 60}秒`;
 }
-function fmtDelta(d) { return d == null ? '-' : (d > 0 ? '+' : '') + d; }
+function fmtDelta(d) { return d == null ? '-' : (d > 0 ? '+' : '') + (Math.round(d * 100) / 100).toFixed(2); }
+function fmtElo(v) { return v == null ? '-' : (Math.round(v * 100) / 100).toFixed(2); }
 function fmtTime(ts) {
   if (!ts) return '';
   const d = new Date(ts), p = (n) => String(n).padStart(2, '0');
@@ -430,6 +431,13 @@ const STYLE_LABELS = {
 function styleLabel(key) { if (!key) return '-'; return STYLE_LABELS[String(key).toLowerCase()] || String(key); }
 
 // ---- 对局档案（本地 matches 表，最近 500 局） ----------
+// 对局状态（本机视角）：观战 / 胜 / 负 / 未知
+function matchState(m) {
+  if (m.localSpectator) return { text: '观战', cls: 'spec' };
+  if (m.localWon === true) return { text: '胜', cls: 'win' };
+  if (m.localWon === false) return { text: '负', cls: 'loss' };
+  return { text: '未知', cls: 'unk' };
+}
 function renderArchive(list) {
   archiveList = Array.isArray(list) ? list : [];
   const el = $('archiveList');
@@ -438,28 +446,28 @@ function renderArchive(list) {
     el.innerHTML = '<span class="dim">暂无对局记录（本地 matches 表为空）。</span>';
     return;
   }
-  el.innerHTML = list.map((m) => {
-    const fid = m.fid || '';
-    const link = fid ? ` data-link="${MATCH_URL(fid)}"` : '';
-    const wonTxt = m.localWon == null ? (m.custom ? '自定义' : '未知') : (m.localWon ? '胜' : '负');
-    const modeTxt = m.custom === true ? '自定义' : m.custom === false ? '排位' : '';
-    return `
-    <div class="archive-item"${link} data-fid="${fid}" title="左键：查看详情；右键：在 BATrace 打开对局">
-      <b>${esc(m.map || '未知地图')}</b>
-      <span class="dim">${esc(fid || '无ID')}</span>
-      <span class="${m.localWon == null ? 'unk' : m.localWon ? 'win' : 'loss'}">${wonTxt}</span>
-      ${modeTxt ? `<span class="mode-tag ${m.custom ? 'custom' : 'ranked'}">${modeTxt}</span>` : ''}
-      <span>${m.playerCount || 0} 人</span>
-      <span>${fmtDuration(m.durationSec)}</span>
-      <span class="dim">${fmtTime(m.endTime)}</span>
-    </div>`;
-  }).join('');
-  // 左键 → 本地详情弹窗；右键保持跳 BATrace（data-link）
-  el.querySelectorAll('.archive-item[data-fid]').forEach((item) => {
-    item.addEventListener('click', (e) => {
-      e.preventDefault();
-      openMatchDetail(item.dataset.fid);
-    });
+  const modeBadge = (m) => m.mode === 'custom' ? '<span class="mode-tag custom">自定义</span>' : m.mode === 'ranked' ? '<span class="mode-tag ranked">排位</span>' : (m.custom === true ? '<span class="mode-tag custom">自定义</span>' : m.custom === false ? '<span class="mode-tag ranked">排位</span>' : '<span class="dim">未知</span>');
+  el.innerHTML = `
+    <table class="archive-table">
+      <thead><tr><th>状态</th><th>模式</th><th>地图</th><th>ELO</th><th>时间</th><th>账号</th></tr></thead>
+      <tbody>${list.map((m) => {
+        const fid = m.fid || '';
+        const link = fid ? ` data-link="${MATCH_URL(fid)}"` : '';
+        const st = matchState(m);
+        const elo = m.localEloDelta != null ? fmtDelta(m.localEloDelta) + ' / ' + fmtElo(m.localEloAfter) : '-';
+        const who = m.localPersona || m.localName || '';
+        return `<tr class="archive-row"${link} data-fid="${fid}" title="左键：详情；右键：在 BATrace 打开对局">
+          <td class="${st.cls}">${st.text}</td>
+          <td>${modeBadge(m)}</td>
+          <td>${esc(m.map || '未知地图')}</td>
+          <td class="${m.localEloDelta == null ? 'dim' : m.localEloDelta > 0 ? 'win' : 'loss'}">${elo}</td>
+          <td class="dim">${fmtTime(m.endTime)}</td>
+          <td class="dim">${who ? '[' + esc(who) + ']' : ''}</td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table>`;
+  el.querySelectorAll('.archive-row[data-fid]').forEach((item) => {
+    item.addEventListener('click', (e) => { e.preventDefault(); openMatchDetail(item.dataset.fid); });
   });
 }
 
@@ -469,10 +477,18 @@ async function openMatchDetail(fid) {
   $('matchTitle').textContent = '对局详情';
   $('matchFid').textContent = '对局 ID ' + fid;
   $('matchDetailBody').innerHTML = '<div class="dim">载入中…</div>';
+  clearInvGameTimer();
+  stopRadarLoading();
+  // 250ms 内未返回（即真实请求）再显示雷达加载动画；本地/缓存命中不闪
+  let radarTimer = setTimeout(() => { radarTimer = null; startRadarLoading($('matchGameWrap'), $('matchGame')); }, 250);
   try {
     const d = await BA.getMatchDetail(fid);
+    if (radarTimer) { clearTimeout(radarTimer); radarTimer = null; }
+    stopRadarLoading();
     renderMatchDetail(d);
   } catch (e) {
+    if (radarTimer) { clearTimeout(radarTimer); radarTimer = null; }
+    stopRadarLoading();
     $('matchDetailBody').innerHTML = '<div class="loss">加载失败：' + esc(e.message) + '</div>';
   }
 }
@@ -480,39 +496,84 @@ function renderMatchDetail(d) {
   if (!d) { $('matchDetailBody').innerHTML = '<div class="dim">本地无此对局记录。</div>'; return; }
   $('matchTitle').textContent = d.map || '未知地图';
   $('matchFid').textContent = '对局 ID ' + d.fid;
-  const winner = d.winnerTeam != null
-    ? (d.winnerTeam === 0 ? '队伍A 胜利' : '队伍B 胜利')
-    : (d.localWon != null ? (d.localWon ? '我方胜利' : '我方落败') : (d.custom ? '自定义（胜负未知）' : '胜负未知'));
-  const mode = d.custom === true ? '自定义' : d.custom === false ? '排位' : '未知';
-  const groups = { Alpha: [], Bravo: [], Spectators: [], Other: [] };
+  const modeTxt = d.mode === 'custom' ? '自定义' : d.mode === 'ranked' ? '排位' : (d.custom === true ? '自定义' : d.custom === false ? '排位' : '未知');
+  const st = matchState(d);
+  const elo = d.localEloDelta != null ? fmtDelta(d.localEloDelta) : '-';
+  const settle = d.localEloAfter != null ? fmtElo(d.localEloAfter) : '-';
+  const sc = d.localScores ? (d.localScores.destruction ?? '-') + '/' + (d.localScores.losses ?? '-') : '-';
+  const account = d.localPersona || d.localName || '';
+  const fetchNote = d.fetched ? '<div class="dim">（已从 API 补齐）</div>' : (d.fetchError ? `<div class="dim">（API 补齐失败：${esc(d.fetchError)}）</div>` : '');
+  const groups = { 0: [], 1: [], 100: [], other: [] };
   for (const p of d.players || []) {
     let g;
-    if (p.teamId === 0) g = 'Alpha';
-    else if (p.teamId === 1) g = 'Bravo';
-    else if (p.teamId === 100 || p.team === 'Spectators') g = 'Spectators';
-    else if (p.team === 'Alpha') g = 'Alpha';
-    else if (p.team === 'Bravo') g = 'Bravo';
-    else g = 'Other';
+    if (p.teamId === 0 || p.teamId === 1 || p.teamId === 100) g = p.teamId;
+    else if (p.team === 'Alpha') g = 0;
+    else if (p.team === 'Bravo') g = 1;
+    else if (p.team === 'Spectators') g = 100;
+    else g = 'other';
     groups[g].push(p);
   }
-  const groupHtml = (title, list) => list.length ? `
-    <div class="inv-section"><b>${title}（${list.length}）</b><div class="inv-list">${list.map((p) => {
-      const delta = (p.oldRating != null && p.newRating != null) ? ` <span class="dim">ELO ${fmtDelta(Math.round((p.newRating - p.oldRating) * 10) / 10)}</span>` : '';
-      return `<div class="inv-item" data-id="${esc(p.id)}" data-name="${esc(p.name || '')}" data-link="${PLAYER_URL(p.id)}" title="右键：调查羁绊 / 在 BATrace 打开"><b>${esc(p.name || '未知')}</b><span class="dim">ID ${esc(p.id)}</span>${delta}</div>`;
-    }).join('')}</div></div>` : '';
+  const playerRow = (p) => {
+    const delta = (p.oldRating != null && p.newRating != null) ? fmtDelta(p.newRating - p.oldRating) : '-';
+    const score = p.destructionScore != null ? p.destructionScore + '/' + (p.lossesScore ?? '-') : '-';
+    const obj = p.objectivesCaptured != null ? p.objectivesCaptured : '-';
+    const k = p.killed != null ? p.killed : '-';
+    const dmg = p.damageDealt != null ? p.damageDealt : '-';
+    const taken = p.damageReceived != null ? p.damageReceived : '-';
+    const dlr = p.dlRatio != null ? p.dlRatio : '-';
+    const sp = p.supplyPoints != null ? p.supplyPoints : '-';
+    const ex = p.exp != null ? p.exp : '-';
+    const md = p.medals != null ? p.medals : '-';
+    return `<tr data-id="${esc(p.id)}" data-name="${esc(p.name || '')}" data-link="${PLAYER_URL(p.id)}" title="右键：调查羁绊 / BATrace">
+      <td><b>${esc(p.name || '未知')}</b></td>
+      <td class="dim md-id-cell"><span class="md-id">${esc(p.id)}</span></td>
+      <td>${delta}</td>
+      <td class="dim">${score}</td>
+      <td class="dim">${obj}</td>
+      <td class="dim">${k}</td>
+      <td class="dim">${dmg}</td>
+      <td class="dim">${taken}</td>
+      <td class="dim">${dlr}</td>
+      <td class="dim">${sp}</td>
+      <td class="dim">${ex}</td>
+      <td class="dim">${md}</td>
+    </tr>`;
+  };
+  const group = (title, list) => list.length ? `
+    <div class="inv-section"><b>${title}（${list.length}）</b>
+      <table class="md-table">
+        <colgroup>
+          <col style="width:13%"><col style="width:11%"><col style="width:8%"><col style="width:10%">
+          <col style="width:7%"><col style="width:7%"><col style="width:9%"><col style="width:9%">
+          <col style="width:6%"><col style="width:7%"><col style="width:7%"><col style="width:6%">
+        </colgroup>
+        <thead><tr><th>玩家</th><th>ID</th><th>ELO变化</th><th>评分</th><th>占点</th><th>击杀</th><th>伤害</th><th>承伤</th><th>K/D</th><th>补给</th><th>经验</th><th>奖牌</th></tr></thead>
+        <tbody>${list.map(playerRow).join('')}</tbody>
+      </table>
+    </div>` : '';
+  let body = '';
+  if (d.winnerTeam === 0 || d.winnerTeam === 1) {
+    const w = d.winnerTeam, l = d.winnerTeam === 0 ? 1 : 0;
+    body = group('🏆 胜方 ' + (w === 0 ? 'Alpha' : 'Bravo'), groups[w]) + group('💀 败方 ' + (l === 0 ? 'Alpha' : 'Bravo'), groups[l]);
+  } else {
+    body = group('Alpha 队', groups[0]) + group('Bravo 队', groups[1]);
+  }
+  body += group('👁 观战', groups[100]) + group('其他', groups.other);
   $('matchDetailBody').innerHTML = `
     <div class="inv-stats">
       <div class="inv-stat"><b>${esc(d.fid)}</b><span>对局 ID</span></div>
       <div class="inv-stat"><b>${esc(d.map || '未知地图')}</b><span>地图</span></div>
       <div class="inv-stat"><b>${fmtTime(d.endTime)}</b><span>时间</span></div>
       <div class="inv-stat"><b>${fmtDuration(d.durationSec)}</b><span>时长</span></div>
-      <div class="inv-stat"><b>${esc(winner)}</b><span>胜方</span></div>
-      <div class="inv-stat"><b>${mode}</b><span>局类型</span></div>
+      <div class="inv-stat"><b>${modeTxt}</b><span>模式</span></div>
+      <div class="inv-stat"><b class="${st.cls}">${st.text}</b><span>结果</span></div>
+      <div class="inv-stat"><b>${elo}</b><span>ELO变化</span></div>
+      <div class="inv-stat"><b>${settle}</b><span>结算ELO</span></div>
+      <div class="inv-stat"><b>${sc}</b><span>评分</span></div>
+      <div class="inv-stat"><b>${account ? esc(account) : '-'}</b><span>本机账号</span></div>
     </div>
-    ${groupHtml('Alpha 队', groups.Alpha)}
-    ${groupHtml('Bravo 队', groups.Bravo)}
-    ${groupHtml('观战', groups.Spectators)}
-    ${groupHtml('其他', groups.Other)}`;
+    ${fetchNote}
+    ${body}`;
 }
 
 // ---------- 卡组工具 ----------
@@ -802,6 +863,12 @@ function showCtx(x, y, items) {
   el.style.left = Math.max(4, Math.min(x, window.innerWidth - 190)) + 'px';
   el.style.top = Math.max(4, Math.min(y, window.innerHeight - 40 * items.length - 12)) + 'px';
 }
+async function refreshMatchRow(fid) {
+  try {
+    const r = await BA.refreshMatch(fid);
+    setStatus((r && r.message) || '已刷新对局信息', !!(r && r.ok));
+  } catch (e) { setStatus('刷新失败：' + e.message, false); }
+}
 document.addEventListener('contextmenu', (e) => {
   const t = e.target.closest('[data-link]');
   if (!t || !t.dataset.link) { hideCtx(); return; }
@@ -809,6 +876,9 @@ document.addEventListener('contextmenu', (e) => {
   const items = [];
   if (t.dataset.id) {
     items.push({ label: '🔍 调查羁绊', action: () => openInvestigate(t.dataset.id, t.dataset.name) });
+  }
+  if (t.dataset.fid) {
+    items.push({ label: '🔄 刷新对局信息', action: () => refreshMatchRow(t.dataset.fid) });
   }
   items.push({ label: '🌐 在 BATrace 打开', action: () => openLink(t.dataset.link) });
   showCtx(e.clientX, e.clientY, items);
@@ -821,10 +891,10 @@ let radarLoading = null;
 let invGameTimer = null;
 function clearInvGameTimer() { if (invGameTimer) { clearTimeout(invGameTimer); invGameTimer = null; } }
 function showInvContent() { const c = $('invContent'); if (c) c.classList.remove('hidden'); }
-function startRadarLoading() {
+// 可复用的雷达扫描加载动画（调查弹窗 / 对局详情弹窗共用）
+// 效果：旋转扫线 + 拖尾扇形；随机移动目标，扫线扫过才点亮，随后缓慢熄灭
+function startRadarLoading(wrap, canvas) {
   stopRadarLoading();
-  const wrap = $('invGameWrap');
-  const canvas = $('invGame');
   if (!wrap || !canvas) return;
   wrap.classList.remove('hidden');
   const rect = canvas.getBoundingClientRect();
@@ -832,28 +902,51 @@ function startRadarLoading() {
   canvas.height = Math.max(180, Math.round(rect.height));
   const ctx = canvas.getContext('2d');
   const W = canvas.width, H = canvas.height;
-  const blips = [];
-  let sweep = 0, raf = 0;
-  let last = performance.now();
+  const cx = W / 2, cy = H / 2, R = Math.min(W, H) * 0.42;
+  // 固定位置目标（真实雷达接触点风格：位置静止，扫到才点亮、随后缓慢熄灭）
+  const targets = [];
+  for (let i = 0; i < 9; i++) {
+    const a = Math.random() * Math.PI * 2;
+    const r = 0.18 + Math.random() * 0.72;
+    targets.push({
+      x: cx + Math.cos(a) * r * R,
+      y: cy + Math.sin(a) * r * R,
+      bright: 0
+    });
+  }
+  const angDiff = (a, b) => { let d = (a - b) % (Math.PI * 2); if (d > Math.PI) d -= Math.PI * 2; if (d < -Math.PI) d += Math.PI * 2; return d; };
+  let sweep = Math.random() * Math.PI * 2, raf = 0, last = performance.now();
   function frame(now) {
     const dt = Math.min(0.05, (now - last) / 1000); last = now;
-    sweep += dt * 1.4;
-    if (Math.random() < dt * 1.2) blips.push({ a: Math.random() * Math.PI * 2, r: 0.15 + Math.random() * 0.7, life: 2.5 });
-    for (let i = blips.length - 1; i >= 0; i--) { blips[i].life -= dt; if (blips[i].life <= 0) blips.splice(i, 1); }
+    const speed = 1.7; // 扫线角速度 rad/s
+    const prev = sweep;
+    sweep += dt * speed;
+    for (const t of targets) {
+      const ta = Math.atan2(t.y - cy, t.x - cx);
+      if (Math.abs(angDiff(sweep, ta)) < speed * dt * 1.4 + 0.06) t.bright = 1; // 被扫到 → 点亮
+      t.bright = Math.max(0, t.bright - dt * 0.34); // 缓慢熄灭
+    }
     ctx.clearRect(0, 0, W, H);
-    ctx.fillStyle = '#07130d'; ctx.fillRect(0, 0, W, H);
-    const cx = W / 2, cy = H / 2, R = Math.min(W, H) * 0.42;
-    ctx.strokeStyle = 'rgba(76,217,138,.2)'; ctx.lineWidth = 1;
-    for (let i = 1; i <= 3; i++) { ctx.beginPath(); ctx.arc(cx, cy, R * i / 3, 0, Math.PI * 2); ctx.stroke(); }
+    ctx.fillStyle = '#06120c'; ctx.fillRect(0, 0, W, H);
+    ctx.strokeStyle = 'rgba(76,217,138,.16)'; ctx.lineWidth = 1;
+    for (let i = 1; i <= 4; i++) { ctx.beginPath(); ctx.arc(cx, cy, R * i / 4, 0, Math.PI * 2); ctx.stroke(); }
     ctx.beginPath(); ctx.moveTo(cx - R, cy); ctx.lineTo(cx + R, cy); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(cx, cy - R); ctx.lineTo(cx, cy + R); ctx.stroke();
-    ctx.strokeStyle = 'rgba(76,217,138,.55)'; ctx.lineWidth = 2;
+    // 拖尾扇形（扫线后方渐变）
+    const wedge = 0.55;
+    const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, R);
+    grad.addColorStop(0, 'rgba(76,217,138,.28)');
+    grad.addColorStop(1, 'rgba(76,217,138,0)');
+    ctx.fillStyle = grad;
+    ctx.beginPath(); ctx.moveTo(cx, cy); ctx.arc(cx, cy, R, sweep - wedge, sweep, false); ctx.closePath(); ctx.fill();
+    // 扫线
+    ctx.strokeStyle = 'rgba(120,255,180,.85)'; ctx.lineWidth = 1.5;
     ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + Math.cos(sweep) * R, cy + Math.sin(sweep) * R); ctx.stroke();
-    ctx.fillStyle = 'rgba(183,193,207,.9)';
-    for (const b of blips) {
-      const x = cx + Math.cos(b.a) * b.r * R, y = cy + Math.sin(b.a) * b.r * R;
-      ctx.globalAlpha = Math.max(0, Math.min(1, b.life / 2.5)) * 0.9;
-      ctx.beginPath(); ctx.arc(x, y, 3, 0, Math.PI * 2); ctx.fill();
+    // 目标点：亮度高则亮、缓慢熄灭
+    for (const t of targets) {
+      ctx.globalAlpha = Math.max(0, Math.min(1, t.bright)) * 0.95;
+      ctx.fillStyle = t.bright > 0.5 ? '#d9ffe8' : '#6ee7a0';
+      ctx.beginPath(); ctx.arc(t.x, t.y, t.bright > 0.5 ? 3.5 : 2.2, 0, Math.PI * 2); ctx.fill();
     }
     ctx.globalAlpha = 1;
     raf = requestAnimationFrame(frame);
@@ -894,7 +987,7 @@ function openInvestigate(id, name) {
   clearInvGameTimer();
   stopRadarLoading();
   // 250ms 内未返回（即真实请求）再显示雷达加载动画；缓存命中不闪
-  invGameTimer = setTimeout(() => { invGameTimer = null; startRadarLoading(); }, 250);
+  invGameTimer = setTimeout(() => { invGameTimer = null; startRadarLoading($('invGameWrap'), $('invGame')); }, 250);
   loadInvestigate(id);
 }
 async function loadInvestigate(id) {
@@ -1271,9 +1364,9 @@ function bindUI() {
   on('searchInput', 'keydown', (e) => { if (e.key === 'Enter') doSearch(); });
 
   // 对局详情弹窗
-  on('btnMatchClose', 'click', () => $('matchModal').classList.add('hidden'));
+  on('btnMatchClose', 'click', () => { clearInvGameTimer(); stopRadarLoading(); $('matchModal').classList.add('hidden'); });
   const matchModal = $('matchModal');
-  if (matchModal) matchModal.addEventListener('click', (e) => { if (e.target === matchModal) matchModal.classList.add('hidden'); });
+  if (matchModal) matchModal.addEventListener('click', (e) => { if (e.target === matchModal) { clearInvGameTimer(); stopRadarLoading(); matchModal.classList.add('hidden'); } });
 
   // 玩家调查弹窗 / 封禁 / 主题
   on('btnInvClose', 'click', () => { clearInvGameTimer(); stopRadarLoading(); $('investigateModal').classList.add('hidden'); });

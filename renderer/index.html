@@ -67,7 +67,7 @@
     <!-- 卡组工具：两列同栏 -->
     <section class="card">
       <div class="card-head">
-        <h2>🃏 卡组工具</h2>
+        <h2>🃏 卡组工具（断箭的卡组）</h2>
         <div class="head-right">
           <span id="deckPaths" class="dim"></span>
           <button id="btnDeckRefresh" class="btn btn-ghost">↻ 刷新</button>
@@ -274,6 +274,10 @@
         <span class="inv-name" id="matchTitle">对局详情</span>
         <span class="dim" id="matchFid"></span>
         <button id="btnMatchClose" class="btn btn-ghost" style="margin-left:auto">✕</button>
+      </div>
+      <div id="matchGameWrap" class="inv-game-wrap full hidden">
+        <div class="inv-loading-top dim">正在载入对局数据…</div>
+        <canvas id="matchGame" width="720" height="420"></canvas>
       </div>
       <div id="matchDetailBody" class="inv-section"></div>
     </div>

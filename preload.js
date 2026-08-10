@@ -55,6 +55,7 @@ contextBridge.exposeInMainWorld('api', {
   syncMyMatchesNow: () => ipcRenderer.invoke('match:syncNow'),
   getTrackerMatches: () => ipcRenderer.invoke('tracker:matches'),
   getMatchDetail: (fid) => ipcRenderer.invoke('tracker:matchDetail', fid),
+  refreshMatch: (fid) => ipcRenderer.invoke('tracker:refreshMatch', fid),
   onBansChanged: (cb) => ipcRenderer.on('bans:changed', (e, d) => cb(d)),
   onBanAlert: (cb) => ipcRenderer.on('bans:alert', (e, d) => cb(d)),
   getCheaters: () => ipcRenderer.invoke('tracker:cheaters'),

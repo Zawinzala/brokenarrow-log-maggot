@@ -41,10 +41,25 @@ function registerStubIpc() {
   handle('tracker:profile', () => ({ id: '0', player: null, stats: {}, encounters: [], nameHistory: [], banned: false, banInfo: null, info: null }));
   handle('tracker:getBans', () => ({ list: [], lastSync: 0 }));
   handle('tracker:syncBans', () => ({ list: [], lastSync: 0 }));
-  handle('tracker:matches', () => ({ list: [] }));
+  handle('tracker:matches', () => ({
+    list: [
+      { fid: '8049993', map: 'Ignalina Powerplant', endTime: Date.now() - 86400000, durationSec: 2700, localWon: false, winnerTeam: null, custom: false, mode: 'ranked', localSpectator: false, localEloDelta: -16.5, localEloAfter: 2555.5225, localScores: { destruction: 5855, losses: 6840, objectives: 4 }, localPersona: 'Zola', localName: 'Zola', playerCount: 10 },
+      { fid: '8028345', map: 'Airport', endTime: Date.now() - 172800000, durationSec: 2700, localWon: null, winnerTeam: 1, custom: true, mode: 'custom', localSpectator: true, localEloDelta: null, localScores: null, localPersona: 'Zola', localName: 'Zola', playerCount: 14 },
+      { fid: '8026925', map: 'Baltiisk', endTime: Date.now() - 259200000, durationSec: 2699, localWon: true, winnerTeam: null, custom: true, mode: 'custom', localSpectator: false, localEloDelta: null, localScores: { destruction: 7690, losses: 5870, objectives: 6 }, localPersona: '公安九课', localName: 'Zola', playerCount: 13 }
+    ]
+  }));
+  handle('tracker:refreshMatch', () => ({ ok: true, message: '已刷新对局信息' }));
+  handle('tracker:matchDetail', (e, fid) => ({
+    fid, map: 'Ignalina Powerplant', mapId: 22, endTime: Date.now() - 86400000, durationSec: 2700,
+    localWon: false, winnerTeam: 1, localTeam: 'Bravo', localTeamId: 1, localSpectator: false, localEloDelta: -16.5,
+    localScores: { destruction: 5855, losses: 6840, objectives: 4 }, localPersona: 'Zola', localName: 'Zola', custom: false, mode: 'ranked', fetched: false,
+    players: [
+      { id: '8863', name: 'Zola', team: 'Bravo', teamId: 1, oldRating: 2571.987, newRating: 2555.5225, destructionScore: 5855, lossesScore: 6840, objectivesCaptured: 4, killed: 12, damageDealt: 5000, damageReceived: 3100, dlRatio: 1.31, supplyPoints: 18000, exp: 2351, medals: 1 },
+      { id: '33422', name: 'eXqtor', team: 'Alpha', teamId: 0, oldRating: 2880, newRating: 2906, destructionScore: 6945, lossesScore: 6065, objectivesCaptured: 1, killed: 8, damageDealt: 3000, damageReceived: 2000, dlRatio: 1.1, supplyPoints: 9000, exp: 1500, medals: 2 }
+    ]
+  }));
   handle('tracker:listAccounts', () => ({ list: [{ id: '8863', name: 'Zola', persona: 'Zola', matchCount: 3 }] }));
   handle('tracker:deleteAccount', (e, id) => ({ ok: true, message: 'smoke deleted ' + id }));
-  handle('tracker:matchDetail', () => null);
   handle('shell:open', () => true);
 }
 
@@ -70,9 +85,13 @@ app.whenReady().then(async () => {
   });
 
   try {
+    console.log('[SMOKE] loadFile');
     await win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+    console.log('[SMOKE] loaded');
     await new Promise((r) => setTimeout(r, 2000));
-    const result = await win.webContents.executeJavaScript(`(async () => {
+    console.log('[SMOKE] exec start');
+    const result = await Promise.race([
+      win.webContents.executeJavaScript(`(async () => {
       const out = { hasApi: typeof window.api !== 'undefined' };
       out.statusText = (document.getElementById('statusText') || {}).textContent;
       out.listenDot = (document.getElementById('listenDot') || {}).className;
@@ -89,6 +108,34 @@ app.whenReady().then(async () => {
         out.multiBondChecked = (document.getElementById('setMultiBond') || {}).checked;
         out.apiHealthClass = (document.getElementById('apiHealth') || {}).className;
         out.apiHealthText = (document.getElementById('apiHealth') || {}).textContent;
+        out.archiveRows = document.querySelectorAll('.archive-row').length;
+        out.archiveFirstRow = (document.querySelector('.archive-row') || {}).textContent || '';
+        out.archiveFirstElo = (document.querySelectorAll('.archive-row td')[3] || {}).textContent || '';
+        // 点击第一行 → 详情表格
+        (document.querySelector('.archive-row') || {}).click();
+        await new Promise((r) => setTimeout(r, 500));
+        out.matchHasRadar = !!document.getElementById('matchGame');
+        out.mdHeader = (document.querySelector('.md-table thead') || {}).textContent || '';
+        out.mdHasSupply = (document.querySelector('.md-table thead') || {}).textContent.indexOf('补给') >= 0;
+        out.mdLayout = (function () {
+          const tbl = document.querySelector('.md-table');
+          const cs = tbl ? getComputedStyle(tbl) : null;
+          const id = document.querySelector('.md-table .md-id');
+          const idcs = id ? getComputedStyle(id) : null;
+          const mb = document.querySelector('#matchModal .modal-box');
+          return {
+            fixed: cs ? cs.tableLayout : '',
+            idBreak: idcs ? idcs.wordBreak : '',
+            modalW: mb ? getComputedStyle(mb).width : '',
+            cols: document.querySelectorAll('.md-table colgroup col').length
+          };
+        })();
+        // 右键档案行 → 菜单含「刷新对局信息」
+        const row = document.querySelector('.archive-row');
+        row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 30, clientY: 30 }));
+        out.ctxText = (document.getElementById('ctxMenu') || {}).textContent || '';
+        document.dispatchEvent(new MouseEvent('click'));
+        document.getElementById('btnMatchClose').click();
         // 点卡组刷新
         const before = document.getElementById('deckFront').options.length;
         document.getElementById('btnDeckRefresh').click();
@@ -98,7 +145,9 @@ app.whenReady().then(async () => {
         out.deckMsg = (document.getElementById('deckMsg') || {}).textContent || '';
       }
       return out;
-    })()`);
+      })()`),
+      new Promise((res) => setTimeout(() => res('EXEC_TIMEOUT'), 12000))
+    ]);
     logs.push('RESULT: ' + JSON.stringify(result, null, 1));
   } catch (e) {
     logs.push('SMOKE ERROR: ' + (e && e.stack || e));

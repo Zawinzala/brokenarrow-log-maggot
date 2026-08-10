@@ -50,6 +50,7 @@ class PlayerTracker {
     } catch (e) { /* 损坏用默认空库 */ }
     this._evict();
     this._migrateLocalAccounts();
+    this._recomputeLocalWon(); // 修复旧数据：排位局以 ELO 增减为权威
   }
 
   // v1 → v2：只保留数字对局 ID 的局，按 fid 聚合玩家；t: 无 ID 记录丢弃
@@ -68,6 +69,7 @@ class PlayerTracker {
             fid, mapId: null, map: '', endTime: e.at || null, durationSec: null,
             winnerTeam: null, localWon: e.won != null ? !!e.won : null,
             localTeam: e.myTeam || null, custom: null,
+            mode: null, localTeamId: null, localSpectator: false, localEloDelta: null, localEloAfter: null, localScores: null,
             players: [], source: 'log', firstSeenAt: e.at || null, syncedAt: null
           };
           matches[fid] = m;
@@ -202,6 +204,24 @@ class PlayerTracker {
     } catch (e) {}
   }
 
+  // 启动迁移：修复旧数据——排位局以 ELO 增减为权威（旧「占领分判定」可能留下错误 winnerTeam/localWon）
+  _recomputeLocalWon() {
+    let changed = false;
+    for (const m of Object.values(this.data.matches)) {
+      if (m.localSpectator) {
+        if (m.localWon != null) { m.localWon = null; changed = true; }
+        continue;
+      }
+      const delta = m.localEloDelta;
+      if (m.mode === 'ranked' && delta != null && delta !== 0 && m.localTeamId != null) {
+        const won = delta > 0;
+        const wt = won ? m.localTeamId : (m.localTeamId === 0 ? 1 : 0);
+        if (m.localWon !== won || m.winnerTeam !== wt) { m.localWon = won; m.winnerTeam = wt; changed = true; }
+      }
+    }
+    if (changed) this._flush();
+  }
+
   // 账号数据管理：列出本机账号（含各自场次）
   listAccounts() {
     const ids = new Set(this.localIds());
@@ -270,11 +290,14 @@ class PlayerTracker {
       this._noteLocalAccount(String(me.id), me.name, persona, at);
     }
     const localTeam = me ? (me.team === 'Spectators' ? null : (me.team || null)) : null;
+    const localTeamId = me ? (me.team === 'Spectators' ? 100 : me.team === 'Bravo' ? 1 : me.team === 'Alpha' ? 0 : null) : null;
+    const localSpectator = !!(me && me.team === 'Spectators');
     let rec = this.data.matches[fid];
     if (!rec) {
       rec = {
         fid, mapId: null, map: m.map || '', endTime: m.endTime || at, durationSec: m.durationSec || null,
         winnerTeam: null, localWon: null, localTeam, custom: null,
+        mode: null, localTeamId, localSpectator, localEloDelta: null, localEloAfter: null, localScores: null,
         localPlayerId: me && me.id != null ? String(me.id) : null, localPersona: persona || null,
         players: [], source: 'log', firstSeenAt: at, syncedAt: null
       };
@@ -285,6 +308,8 @@ class PlayerTracker {
       if (!rec.endTime && m.endTime) rec.endTime = m.endTime;
       if (rec.durationSec == null && m.durationSec != null) rec.durationSec = m.durationSec;
       if (!rec.localTeam && localTeam) rec.localTeam = localTeam;
+      if (rec.localTeamId == null && localTeamId != null) rec.localTeamId = localTeamId;
+      if (!rec.localSpectator && localSpectator) rec.localSpectator = true;
       if (!rec.firstSeenAt) rec.firstSeenAt = at;
       if (me && me.id != null && rec.localPlayerId == null) rec.localPlayerId = String(me.id);
       if (persona && !rec.localPersona) rec.localPersona = persona;
@@ -316,34 +341,43 @@ class PlayerTracker {
       if (!NUM_FID.test(fid)) continue;
       const d = (raw && raw.data) || {};
       const data = (d.Data && typeof d.Data === 'object') ? d.Data : {};
+      const existed = !!this.data.matches[fid];
+      const recPrev = existed ? this.data.matches[fid] : null;
       const lid = this.data.localId;
-      const myEntry = lid != null ? (data[lid] || null) : null;
-      const localName = this._localName || null;
-      const myEntryByName = !myEntry && localName ? Object.values(data).find((x) => x.Name === localName) : null;
-      const me = myEntry || myEntryByName;
-      if (me && me.Id != null) {
+      // 本机玩家：优先用该局已记录的本机 ID（旧账号对局换号后仍按旧账号算 ELO/胜负/评分），再当前主账号，再本地玩家名
+      const recLocalId = recPrev && recPrev.localPlayerId != null ? String(recPrev.localPlayerId) : null;
+      let me = recLocalId != null ? (data[recLocalId] || null) : null;
+      if (!me && lid != null && String(lid) !== recLocalId) me = data[lid] || null;
+      if (!me) {
+        const localName = this._localName || null;
+        me = localName ? (Object.values(data).find((x) => x.Name === localName) || null) : null;
+      }
+      // 仅「新记录」或「命中当前主账号」才允许更新主账号（避免旧账号对局把主账号改写）
+      if (me && me.Id != null && (!recPrev || String(me.Id) === String(lid))) {
         this.data.localId = String(me.Id);
+      }
+      if (me && me.Id != null) {
         this._noteLocalAccount(String(me.Id), me.Name, null, at);
       }
-      // 队伍编码：players/matches 的 TeamId —— 1=队伍B、缺失=队伍A、100=观战
+      // 队伍编码：players/matches 的 TeamId —— 缺失=队伍A(0)、1=队伍B(1)、100=观战
       const normalizeTeam = (tid) => {
-        if (tid === 100) return { teamId: null, team: 'Spectators' };
+        if (tid === 100) return { teamId: 100, team: 'Spectators' };
         if (tid === 1) return { teamId: 1, team: 'Bravo' };
         return { teamId: 0, team: 'Alpha' };
       };
       const localNorm = me ? normalizeTeam(me.TeamId) : { teamId: null, team: null };
-      const localTeamId = localNorm.teamId;
-      const winnerTeam = d.WinnerTeam != null ? d.WinnerTeam : null;
+      const localTeamId = localNorm.teamId;           // 0|1|100（观战=100）
+      const localSpectator = localTeamId === 100;
+      const mode = d.Type != null ? 'custom' : 'ranked'; // Type 无=排位、有(1/3)=自定义
+      const winnerTeam = (d.WinnerTeam === 0 || d.WinnerTeam === 1) ? d.WinnerTeam : null;
       const oldR = me && typeof me.OldRating === 'number' ? me.OldRating : null;
       const newR = me && typeof me.NewRating === 'number' ? me.NewRating : null;
-      const hasRating = oldR != null && newR != null;
-      const custom = !hasRating;
+      const delta = (oldR != null && newR != null) ? (newR - oldR) : null;
       let localWon = null;
-      if (hasRating) {
-        if (newR > oldR) localWon = true;
-        else if (newR < oldR) localWon = false;
+      if (!localSpectator && localTeamId != null) {
+        if (mode === 'ranked' && delta != null && delta !== 0) localWon = delta > 0;      // 排位以 ELO 增减为权威（旧占领分留的错胜方可被纠正）
+        else if (winnerTeam != null) localWon = (localTeamId === winnerTeam);             // 其余用 WinnerTeam
       }
-      if (localWon == null && winnerTeam != null && localTeamId != null) localWon = (localTeamId === winnerTeam);
       const mapId = d.MapId != null ? d.MapId : null;
       const endTime = d.EndTime ? d.EndTime * 1000 : null;
       const durationSec = d.TotalPlayTimeInSec != null ? d.TotalPlayTimeInSec : null;
@@ -356,14 +390,20 @@ class PlayerTracker {
           teamId: n.teamId,
           team: n.team,
           oldRating: typeof x.OldRating === 'number' ? x.OldRating : null,
-          newRating: typeof x.NewRating === 'number' ? x.NewRating : null
+          newRating: typeof x.NewRating === 'number' ? x.NewRating : null,
+          destructionScore: typeof x.DestructionScore === 'number' ? x.DestructionScore : null,
+          lossesScore: typeof x.LossesScore === 'number' ? x.LossesScore : null,
+          objectivesCaptured: typeof x.ObjectivesCaptured === 'number' ? x.ObjectivesCaptured : null,
+          killed: typeof x.KilledCount === 'number' ? x.KilledCount : null,
+          damageDealt: typeof x.DamageDealt === 'number' ? Math.round(x.DamageDealt) : null,
+          damageReceived: null, dlRatio: null, supplyPoints: null, exp: null, medals: null
         };
       });
 
-      const existed = !!this.data.matches[fid];
       const rec = this.data.matches[fid] || {
         fid, mapId: null, map: '', endTime: null, durationSec: null,
         winnerTeam: null, localWon: null, localTeam: null, custom: null,
+        mode: null, localTeamId: null, localSpectator: false, localEloDelta: null, localEloAfter: null, localScores: null,
         localPlayerId: me && me.Id != null ? String(me.Id) : null, localPersona: null,
         players: [], source: 'api', firstSeenAt: at, syncedAt: null
       };
@@ -372,11 +412,28 @@ class PlayerTracker {
       if (!rec.map) rec.map = mapId != null ? ('map:' + mapId) : '';
       if (endTime) rec.endTime = endTime;
       if (durationSec != null) rec.durationSec = durationSec;
-      rec.winnerTeam = winnerTeam != null ? winnerTeam : rec.winnerTeam;
-      if (localWon != null) rec.localWon = localWon;
-      if (custom) rec.custom = true;
-      else if (rec.custom == null) rec.custom = false;
-      if (localTeamId != null) rec.localTeam = localTeamId === 1 ? 'Bravo' : 'Alpha';
+      if (mode === 'ranked' && delta != null && delta !== 0 && localTeamId != null) {
+        rec.localWon = delta > 0;
+        rec.winnerTeam = rec.localWon ? localTeamId : (localTeamId === 0 ? 1 : 0);
+      } else {
+        if (winnerTeam != null) rec.winnerTeam = winnerTeam;
+        if (localWon != null) rec.localWon = localWon;
+      }
+      if (mode) { rec.mode = mode; rec.custom = mode === 'custom'; }
+      if (localTeamId != null) {
+        rec.localTeamId = localTeamId;
+        rec.localSpectator = localSpectator;
+        rec.localTeam = localTeamId === 100 ? 'Spectators' : (localTeamId === 1 ? 'Bravo' : 'Alpha');
+      }
+      if (me && me.Id != null) {
+        rec.localEloDelta = delta;
+        rec.localEloAfter = typeof newR === 'number' ? newR : rec.localEloAfter;
+        rec.localScores = {
+          destruction: typeof me.DestructionScore === 'number' ? me.DestructionScore : null,
+          losses: typeof me.LossesScore === 'number' ? me.LossesScore : null,
+          objectives: typeof me.ObjectivesCaptured === 'number' ? me.ObjectivesCaptured : null
+        };
+      }
       rec.source = 'api';
       rec.syncedAt = at;
       // 玩家合并：API 优先，日志补空
@@ -388,6 +445,11 @@ class PlayerTracker {
           if (pl.team) existing.team = pl.team; // API 归一化队伍为准，覆盖旧版残留错误标签
           if (pl.oldRating != null) existing.oldRating = pl.oldRating;
           if (pl.newRating != null) existing.newRating = pl.newRating;
+          if (pl.destructionScore != null) existing.destructionScore = pl.destructionScore;
+          if (pl.lossesScore != null) existing.lossesScore = pl.lossesScore;
+          if (pl.objectivesCaptured != null) existing.objectivesCaptured = pl.objectivesCaptured;
+          if (pl.killed != null) existing.killed = pl.killed;
+          if (pl.damageDealt != null) existing.damageDealt = pl.damageDealt;
         } else {
           rec.players.push(pl);
         }
@@ -399,6 +461,18 @@ class PlayerTracker {
     this._evict();
     this._flush();
     return { added, updated };
+  }
+
+  // 从 /api/analysis/match 的 teamComparison 推导胜方 teamId（0=队伍A/1=队伍B）：
+  // 用 destructionScore（摧毁分），高者胜；相等→null。（占领分不可靠：8049993 占点多仍输）
+  // 仅作 WinnerTeam 缺失时的兜底。
+  static winnerTeamFromMatch(raw) {
+    const tc = raw && raw.teamComparison;
+    if (!tc || !tc.teamATotals || !tc.teamBTotals) return null;
+    const a = tc.teamATotals.destructionScore;
+    const b = tc.teamBTotals.destructionScore;
+    if (a == null || b == null || a === b) return null;
+    return a > b ? 0 : 1;
   }
 
   // 用推导出的胜方 teamId（0=队伍A/1=队伍B）补某场我方胜负；只补 localWon==null 的场次，返回新 localWon
@@ -490,6 +564,91 @@ class PlayerTracker {
       }
     }
     return out;
+  }
+
+  // 用 /api/match 的 matchInfo 补齐/回写某局（惰性详情用；有则覆盖、无则保留）
+  fillMatchFromMatchInfo(fid, mi) {
+    if (fid == null || !mi || typeof mi !== 'object') return null;
+    fid = String(fid);
+    let rec = this.data.matches[fid];
+    const isNew = !rec;
+    if (!rec) {
+      rec = {
+        fid, mapId: null, map: '', endTime: null, durationSec: null,
+        winnerTeam: null, localWon: null, localTeam: null, custom: null,
+        mode: null, localTeamId: null, localSpectator: false, localEloDelta: null, localEloAfter: null, localScores: null,
+        localPlayerId: null, localPersona: null,
+        players: [], source: 'api', firstSeenAt: Date.now(), syncedAt: null
+      };
+      this.data.matches[fid] = rec;
+    }
+    const mode = mi.Type != null ? 'custom' : 'ranked';
+    if (mode) { rec.mode = mode; rec.custom = mode === 'custom'; }
+    if (mi.MapId != null) rec.mapId = mi.MapId;
+    if (!rec.map || /^map:\d+$/.test(rec.map)) rec.map = mi.MapId != null ? ('map:' + mi.MapId) : rec.map;
+    if (mi.EndTime) rec.endTime = mi.EndTime * 1000;
+    if (mi.TotalPlayTimeInSec != null) rec.durationSec = mi.TotalPlayTimeInSec;
+    if (mi.WinnerTeam === 0 || mi.WinnerTeam === 1) rec.winnerTeam = mi.WinnerTeam;
+    const data = (mi.Data && typeof mi.Data === 'object') ? mi.Data : {};
+    const norm = (tid) => (tid === 100 ? 100 : tid === 1 ? 1 : 0);
+    for (const x of Object.values(data)) {
+      if (x == null || x.Id == null) continue;
+      const tid = norm(x.TeamId);
+      const pid = String(x.Id);
+      let pl = rec.players.find((p) => p.id === pid);
+      if (!pl) {
+        pl = { id: pid, name: '', teamId: null, team: null, oldRating: null, newRating: null, destructionScore: null, lossesScore: null, objectivesCaptured: null, killed: null, damageDealt: null, damageReceived: null, dlRatio: null, supplyPoints: null, exp: null, medals: null };
+        rec.players.push(pl);
+      }
+      if (x.Name != null && x.Name !== '') pl.name = String(x.Name);
+      pl.teamId = tid;
+      pl.team = tid === 100 ? 'Spectators' : tid === 1 ? 'Bravo' : 'Alpha';
+      if (typeof x.OldRating === 'number') pl.oldRating = x.OldRating;
+      if (typeof x.NewRating === 'number') pl.newRating = x.NewRating;
+      if (typeof x.DestructionScore === 'number') pl.destructionScore = x.DestructionScore;
+      if (typeof x.LossesScore === 'number') pl.lossesScore = x.LossesScore;
+      if (typeof x.ObjectivesCaptured === 'number') pl.objectivesCaptured = x.ObjectivesCaptured;
+      if (typeof x.Destruction === 'number') pl.killed = x.Destruction; // 击毁数（玩家级字段，非 KilledCount）
+      if (typeof x.DamageDealt === 'number') pl.damageDealt = Math.round(x.DamageDealt);
+      if (typeof x.DamageReceived === 'number') pl.damageReceived = Math.round(x.DamageReceived);
+      if (typeof x.DLRatio === 'number') pl.dlRatio = Math.round(x.DLRatio * 100) / 100;
+      if (typeof x.SupplyPointsConsumed === 'number') pl.supplyPoints = x.SupplyPointsConsumed;
+      if (typeof x.TotalExp === 'number') pl.exp = x.TotalExp;
+      if (Array.isArray(x.Medals)) pl.medals = x.Medals.length;
+    }
+    // 本机字段：优先用该局已记录的本机 ID（旧账号对局换号后仍按旧账号算 ELO/胜负/评分），再当前主账号，再本地玩家名
+    const recLid = rec.localPlayerId != null ? String(rec.localPlayerId) : null;
+    const lid = this.data.localId;
+    let me2 = recLid != null ? Object.values(data).find((x) => x && String(x.Id) === String(recLid)) : null;
+    if (!me2 && lid != null && String(lid) !== recLid) me2 = Object.values(data).find((x) => x && String(x.Id) === String(lid)) || null;
+    if (!me2 && this._localName) me2 = Object.values(data).find((x) => x && x.Name === this._localName) || null;
+    if (me2 && me2.Id != null) {
+      const tid = norm(me2.TeamId);
+      rec.localTeamId = tid;
+      rec.localSpectator = tid === 100;
+      rec.localTeam = tid === 100 ? 'Spectators' : tid === 1 ? 'Bravo' : 'Alpha';
+      if (typeof me2.OldRating === 'number' && typeof me2.NewRating === 'number') { rec.localEloDelta = me2.NewRating - me2.OldRating; rec.localEloAfter = me2.NewRating; }
+      rec.localScores = {
+        destruction: typeof me2.DestructionScore === 'number' ? me2.DestructionScore : null,
+        losses: typeof me2.LossesScore === 'number' ? me2.LossesScore : null,
+        objectives: typeof me2.ObjectivesCaptured === 'number' ? me2.ObjectivesCaptured : null
+      };
+      if (rec.localPlayerId == null) rec.localPlayerId = String(me2.Id);
+    }
+    // 胜负：观战→null；排位且 ELO 增减→权威（同时校正 winnerTeam）；其余用 WinnerTeam
+    if (rec.localSpectator) rec.localWon = null;
+    else if (rec.localTeamId != null) {
+      if (rec.mode === 'ranked' && rec.localEloDelta != null && rec.localEloDelta !== 0) {
+        rec.localWon = rec.localEloDelta > 0;
+        rec.winnerTeam = rec.localWon ? rec.localTeamId : (rec.localTeamId === 0 ? 1 : 0);
+      } else if (rec.winnerTeam === 0 || rec.winnerTeam === 1) {
+        rec.localWon = (rec.localTeamId === rec.winnerTeam);
+      }
+    }
+    if (isNew) this.data.lastMatchSync = rec.syncedAt || this.data.lastMatchSync;
+    this._evict();
+    this._flush();
+    return rec;
   }
 
   _matchesForPlayer(id) {
@@ -598,4 +757,4 @@ class PlayerTracker {
   }
 }
 
-module.exports = { PlayerTracker, MAX_MATCHES, MAX_PLAYERS };
+module.exports = { PlayerTracker, MAX_MATCHES, MAX_PLAYERS, winnerTeamFromMatch: PlayerTracker.winnerTeamFromMatch };

@@ -16,7 +16,7 @@ const { createDeckSync, sanitizeAccount } = require('./src/deckSync');
 const { spawn } = require('child_process');
 const { Analyzer, mapName } = require('./src/analyzer');
 const { MatchArchive } = require('./src/storage');
-const { PlayerTracker } = require('./src/tracker');
+const { PlayerTracker, winnerTeamFromMatch } = require('./src/tracker');
 const { zipCreate, zipExtract } = require('./src/zip');
 
 let win = null;
@@ -481,14 +481,7 @@ async function syncMyMatches() {
 
 // 从 analysis/match 的 teamComparison 推导胜方 teamId（0=队伍A/1=队伍B）：
 // 只认占点数（与网站一致；摧毁分不可靠，勿用）；占点相同则未知。
-function winnerTeamFromMatch(raw) {
-  const tc = raw && raw.teamComparison;
-  if (!tc || !tc.teamATotals || !tc.teamBTotals) return null;
-  const aObj = tc.teamATotals.objectivesCaptured;
-  const bObj = tc.teamBTotals.objectivesCaptured;
-  if (aObj == null || bObj == null || aObj === bObj) return null;
-  return aObj > bObj ? 0 : 1;
-}
+// winnerTeamFromMatch 已移至 src/tracker.js（用 destructionScore 推导，仅兜底）
 
 // 对「players/matches 缺 WinnerTeam」的场次（多为自定义局），用 analysis/match 推导胜方并回填
 async function backfillMissingWinners(matchList) {
@@ -511,6 +504,7 @@ function matchSummary() {
   if (!tracker) return [];
   const out = [];
   for (const m of Object.values(tracker.data.matches)) {
+    const localPl = m.localPlayerId != null && m.players ? m.players.find((p) => String(p.id) === String(m.localPlayerId)) : null;
     out.push({
       fid: m.fid,
       map: (m.map && !/^map:\d+$/.test(m.map)) ? m.map : (m.mapId != null ? mapName(m.mapId) : ''),
@@ -519,6 +513,13 @@ function matchSummary() {
       localWon: m.localWon != null ? !!m.localWon : null,
       winnerTeam: m.winnerTeam != null ? m.winnerTeam : null,
       custom: m.custom,
+      mode: m.mode || null,
+      localSpectator: !!m.localSpectator,
+      localEloDelta: m.localEloDelta != null ? m.localEloDelta : null,
+      localEloAfter: m.localEloAfter != null ? m.localEloAfter : null,
+      localScores: m.localScores || null,
+      localPersona: m.localPersona || null,
+      localName: (localPl && localPl.name) || null,
       playerCount: m.players ? m.players.length : 0
     });
   }
@@ -530,6 +531,7 @@ function matchSummary() {
 function matchDetail(fid) {
   const m = tracker && tracker.data.matches[String(fid)];
   if (!m) return null;
+  const localPl = m.localPlayerId != null && m.players ? m.players.find((p) => String(p.id) === String(m.localPlayerId)) : null;
   return {
     fid: m.fid,
     map: (m.map && !/^map:\d+$/.test(m.map)) ? m.map : (m.mapId != null ? mapName(m.mapId) : ''),
@@ -539,8 +541,16 @@ function matchDetail(fid) {
     localWon: m.localWon != null ? !!m.localWon : null,
     winnerTeam: m.winnerTeam != null ? m.winnerTeam : null,
     localTeam: m.localTeam,
+    localTeamId: m.localTeamId != null ? m.localTeamId : null,
+    localSpectator: !!m.localSpectator,
+    localEloDelta: m.localEloDelta != null ? m.localEloDelta : null,
+    localEloAfter: m.localEloAfter != null ? m.localEloAfter : null,
+    localScores: m.localScores || null,
+    localPersona: m.localPersona || null,
+    localName: (localPl && localPl.name) || null,
     custom: m.custom,
-    players: (m.players || []).map((p) => ({ id: p.id, name: p.name, team: p.team, teamId: p.teamId, oldRating: p.oldRating, newRating: p.newRating }))
+    mode: m.mode || null,
+    players: (m.players || []).map((p) => ({ id: p.id, name: p.name, team: p.team, teamId: p.teamId, oldRating: p.oldRating, newRating: p.newRating, destructionScore: p.destructionScore != null ? p.destructionScore : null, lossesScore: p.lossesScore != null ? p.lossesScore : null, objectivesCaptured: p.objectivesCaptured != null ? p.objectivesCaptured : null, killed: p.killed != null ? p.killed : null, damageDealt: p.damageDealt != null ? p.damageDealt : null, damageReceived: p.damageReceived != null ? p.damageReceived : null, dlRatio: p.dlRatio != null ? p.dlRatio : null, supplyPoints: p.supplyPoints != null ? p.supplyPoints : null, exp: p.exp != null ? p.exp : null, medals: p.medals != null ? p.medals : null }))
   };
 }
 
@@ -791,7 +801,50 @@ function registerIpc() {
   ipcMain.handle('tracker:getBans', () => (tracker ? { list: tracker.listBans(), lastSync: tracker.data.lastBanSync } : { list: [], lastSync: 0 }));
   ipcMain.handle('tracker:matches', () => ({ list: matchSummary() }));
   ipcMain.handle('tracker:cheaters', () => ({ list: cheatersList() }));
-  ipcMain.handle('tracker:matchDetail', (e, fid) => matchDetail(fid));
+  ipcMain.handle('tracker:matchDetail', async (e, fid) => {
+    if (!tracker || !client) return null;
+    let local = matchDetail(fid);
+    // 旧档案缺新字段（mode/队伍/ELO/评分/名单）时也自动拉取补齐
+    const need = !local || local.mode == null || local.localTeamId == null || local.localScores == null || !local.players.length || (local.mode === 'ranked' && local.localEloDelta == null);
+    if (!need) return { ...local, fetched: false };
+    try {
+      const mres = await client.matchById(fid).catch(() => null);
+      const mi = mres && mres.matchInfo ? mres.matchInfo : null;
+      if (mi) tracker.fillMatchFromMatchInfo(fid, mi);
+      let fresh = matchDetail(fid);
+      // 仍无胜方：自定义局用 analysis 的 destructionScore 推导（24h 缓存）
+      if (fresh && fresh.winnerTeam == null && !fresh.localSpectator && fresh.mode === 'custom') {
+        const am = await client.analysisMatch(fid).catch(() => null);
+        const wt = winnerTeamFromMatch(am);
+        if (wt != null) tracker.setMatchWinner(fid, wt);
+        fresh = matchDetail(fid);
+      }
+      send('matches:changed', { list: matchSummary() }); // 补齐后刷新首页预览
+      if (fresh) return { ...fresh, fetched: true };
+      return local;
+    } catch (err) {
+      return local ? { ...local, fetched: false, fetchError: String(err && err.message || err) } : null;
+    }
+  });
+  ipcMain.handle('tracker:refreshMatch', async (e, fid) => {
+    if (!tracker || !client) return { ok: false, message: '未初始化' };
+    try {
+      const mres = await client.matchById(fid).catch(() => null);
+      const mi = mres && mres.matchInfo ? mres.matchInfo : null;
+      if (mi) tracker.fillMatchFromMatchInfo(fid, mi);
+      let fresh = matchDetail(fid);
+      if (fresh && fresh.winnerTeam == null && !fresh.localSpectator && fresh.mode === 'custom') {
+        const am = await client.analysisMatch(fid).catch(() => null);
+        const wt = winnerTeamFromMatch(am);
+        if (wt != null) tracker.setMatchWinner(fid, wt);
+        fresh = matchDetail(fid);
+      }
+      send('matches:changed', { list: matchSummary() }); // 首页预览即时刷新
+      return { ok: !!fresh, message: fresh ? '已刷新对局信息' : '未找到该对局', detail: fresh };
+    } catch (err) {
+      return { ok: false, message: '刷新失败：' + String(err && err.message || err) };
+    }
+  });
   ipcMain.handle('tracker:listAccounts', () => ({ list: tracker ? tracker.listAccounts() : [] }));
   ipcMain.handle('tracker:deleteAccount', (e, id) => {
     if (!tracker || id == null) return { ok: false, message: '参数无效' };
