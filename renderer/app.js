@@ -165,6 +165,8 @@ function closeConfirm(result) {
   if (confirmResolve) { confirmResolve(result); confirmResolve = null; }
 }
 
+// ---------- 房间内也在用本工具的人（服务端比对，保护隐私） ----------
+let toolUserIds = new Set();
 // ---------- 当前对局渲染 ----------
 function renderSession(s) {
   resetPrevIfViewing();
@@ -214,6 +216,7 @@ function catLabel(key) { if (!key) return '-'; return CAT_LABELS[String(key).toL
 function playerCard(p) {
   const selfName = session.localName;
   const selfTag = selfName && p.name === selfName ? '<span class="pself">(我)</span>' : '';
+  const toolTag = toolUserIds.has(String(p.id)) ? '<span class="ptool" title="也在使用本工具">🎮</span>' : '';
   let statHtml = '';
   if (p.status === 'loading') statHtml = '<span class="loading">查询中…</span>';
   else if (p.error) {
@@ -231,7 +234,7 @@ function playerCard(p) {
       ${units ? `<span class="topu" title="最爱：${esc(p.info.topUnits)}">${esc(units)}</span>` : ''}`;
   }
   return `<div class="player-card" data-id="${p.id}" data-name="${esc(p.name)}" data-link="${PLAYER_URL(p.id)}" title="左键：完整报告；右键：在 BATrace 打开">
-    <div class="prow"><span class="pname">${esc(p.name)}${selfTag}</span><span class="pid">ID ${esc(p.id)}</span><button class="p-copy" data-id="${p.id}" title="复制该玩家一行情报">📋</button><span class="pmark">›</span></div>
+    <div class="prow"><span class="pname">${esc(p.name)}${selfTag}${toolTag}</span><span class="pid">ID ${esc(p.id)}</span><button class="p-copy" data-id="${p.id}" title="复制该玩家一行情报">📋</button><span class="pmark">›</span></div>
     <div class="pstats">${statHtml || '<span class="dim">未查询</span>'}</div>
   </div>`;
 }
@@ -454,12 +457,13 @@ function renderArchive(list) {
         const fid = m.fid || '';
         const link = fid ? ` data-link="${MATCH_URL(fid)}"` : '';
         const st = matchState(m);
+        const hasReplay = !!(m.fid && replayFids.has(String(m.fid)));
         const elo = m.localEloDelta != null ? fmtDelta(m.localEloDelta) + ' / ' + fmtElo(m.localEloAfter) : '-';
         const who = m.localPersona || m.localName || '';
         return `<tr class="archive-row"${link} data-fid="${fid}" title="左键：详情；右键：在 BATrace 打开对局">
           <td class="${st.cls}">${st.text}</td>
           <td>${modeBadge(m)}</td>
-          <td>${esc(m.map || '未知地图')}</td>
+          <td>${esc(m.map || '未知地图')}${hasReplay ? ' <span class="replay-mark" title="该对局有录像（含云端）">📹</span>' : ''}</td>
           <td class="${m.localEloDelta == null ? 'dim' : m.localEloDelta > 0 ? 'win' : 'loss'}">${elo}</td>
           <td class="dim">${fmtTime(m.endTime)}</td>
           <td class="dim">${who ? '[' + esc(who) + ']' : ''}</td>
@@ -722,7 +726,7 @@ function renderApmStart(d) {
   if (!d || !d.available) {
     apmRunning = false;
     const reason = !d ? 'APM 无法打开'
-      : d.reason === 'disabled' ? '未开启真实输入统计（请在「设置」中开启，默认关闭）'
+      : d.reason === 'disabled' ? '未开启 APM 监测功能（请在「设置」中开启，默认关闭）'
       : d.reason === 'replay' ? '当前为回放/历史日志，APM 无法统计'
       : d.reason === 'hook' ? '输入钩子初始化失败，APM 无法打开'
       : 'APM 无法打开';
@@ -771,7 +775,7 @@ function renderApmIdle() {
   const meta = $('apmMeta');
   if (meta) meta.textContent = '等待对局…';
   const body = $('apmBody');
-  if (body) body.innerHTML = '<div class="apm-empty dim">对局开始后自动统计：仅记录游戏窗口在前台时的鼠标点击与键盘按键（全局只读钩子，不模拟、不拦截任何输入）。默认关闭，需在「设置」中开启「真实输入统计」。对局结束自动生成每分钟操作图。</div>';
+  if (body) body.innerHTML = '<div class="apm-empty dim">对局开始后自动统计：仅记录游戏窗口在前台时的鼠标点击与键盘按键（全局只读钩子，不模拟、不拦截任何输入）。默认关闭，需在「设置」中开启「APM 监测功能」。对局结束自动生成每分钟操作图。</div>';
 }
 
 function setApmCollapsed(collapsed) {
@@ -793,17 +797,14 @@ function openSettings() {
   $('settingsModal').classList.remove('hidden');
   BA.getConfig().then((cfg) => {
     $('setLogDir').value = cfg.logDir || '';
-    $('setPoll').value = cfg.pollMs;
-    $('setDelay').value = cfg.apiDelayMs;
     $('setAuto').checked = !!cfg.autoQueryCurrentMatch;
-    $('setHeartbeat').checked = !!cfg.heartbeatEnabled;
     $('setInputHook').checked = !!cfg.inputHookEnabled;
-    $('setHeartbeatUrl').value = cfg.heartbeatUrl || '';
     $('setBanPoll').checked = !!cfg.banPollEnabled;
     $('setMatchSync').checked = !!cfg.matchSyncEnabled;
     $('setBanCard').checked = !!cfg.banCardVisible;
     $('setMultiBond').checked = !!cfg.multiAccountBond;
     refreshAccountList();
+    refreshLocalReplayList();
     savedTheme = cfg.theme || 'dark';
     setThemePicker(savedTheme);
     $('dirHint').textContent = '';
@@ -870,6 +871,31 @@ async function refreshMatchRow(fid) {
   } catch (e) { setStatus('刷新失败：' + e.message, false); }
 }
 document.addEventListener('contextmenu', (e) => {
+  const row = e.target.closest('.replay-row');
+  if (row) {
+    e.preventDefault();
+    const fid = row.dataset.fid || '';
+    const src = row.dataset.source;
+    const items = [];
+    if (src === 'local' || src === 'both') {
+      items.push({ label: '📂 打开本地位置', action: () => BA.openLocalReplayFolder() });
+    }
+    if ((src === 'cloud' || src === 'both') && row.dataset.video) {
+      items.push({ label: '🌐 在浏览器打开云端录像', action: () => openLink(row.dataset.video) });
+    }
+    if (fid) {
+      items.push({ label: '📊 打开对局详情', action: () => openMatchDetail(fid) });
+      items.push({ label: '🌐 在 BATrace 打开对局', action: () => openLink(MATCH_URL(fid)) });
+    }
+    if (src === 'both') {
+      items.push({ label: '🗑 删除本地副本', action: () => deleteReplayRow(row) });
+      items.push({ label: '☁ 删除云端录像', action: () => deleteCloudReplayRow(row) });
+    } else {
+      items.push({ label: '🗑 删除录像', action: () => deleteReplayRow(row) });
+    }
+    showCtx(e.clientX, e.clientY, items);
+    return;
+  }
   const t = e.target.closest('[data-link]');
   if (!t || !t.dataset.link) { hideCtx(); return; }
   e.preventDefault();
@@ -884,7 +910,7 @@ document.addEventListener('contextmenu', (e) => {
   showCtx(e.clientX, e.clientY, items);
 });
 document.addEventListener('click', () => hideCtx());
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { hideCtx(); clearInvGameTimer(); stopRadarLoading(); if (window.BAGame && BAGame.isOpen()) BAGame.close(); const bm = $('banAlertModal'); if (bm) bm.classList.add('hidden'); const m = $('investigateModal'); if (m) m.classList.add('hidden'); const mm = $('matchModal'); if (mm) mm.classList.add('hidden'); } });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { hideCtx(); clearInvGameTimer(); stopRadarLoading(); if (window.BAGame && BAGame.isOpen()) BAGame.close(); const bm = $('banAlertModal'); if (bm) bm.classList.add('hidden'); const m = $('investigateModal'); if (m) m.classList.add('hidden'); const mm = $('matchModal'); if (mm) mm.classList.add('hidden'); const rp = $('replayModal'); if (rp) closeReplayPlayer(); } });
 
 ﻿﻿﻿// ---------- 调查加载雷达动画（纯视觉，不可交互） ----------
 let radarLoading = null;
@@ -1119,6 +1145,344 @@ function renderBanAlert(d) {
     </div>`).join('');
   $('banAlertModal').classList.remove('hidden');
 }
+// ---------- 对局录像（对象存储直传） ----------
+let replayFids = new Set(); // 有录像的对局 ID（云端列表 + 待上传队列）
+let replayWarnGb = 6;       // 云端录像存储提醒阈值（免费上限 10GB）
+function renderReplayStatus(s) {
+  const el = $('replayStatus');
+  if (!el) return;
+  if (!s) { el.textContent = ''; return; }
+  const rec = s.recording || {};
+  const up = s.uploader || {};
+  const bits = [];
+  if (rec && rec.active) bits.push('🔴 正在录制' + (rec.current && rec.current.fid ? ' #' + rec.current.fid : ''));
+  if (up && up.pending) bits.push('待上传 ' + up.pending + ' 个');
+  if (up && up.storageTotal != null) bits.push('☁ 云端 ' + fmtSize(up.storageTotal));
+  if (up && up.uploading) bits.push('上传中…');
+  el.textContent = bits.join(' ｜ ');
+  el.title = (up && up.lastError) ? up.lastError : '';
+}
+// 录制小预览（对局录像模块内置，录制时每秒刷新，确认录的是哪块屏）
+function setReplayPreview(active, status) {
+  const w = $('replayPreviewWrap');
+  if (!w) return;
+  w.classList.toggle('hidden', !active);
+  if (!active) return;
+  const cur = (status && status.current) || (status && status.recording && status.recording.current) || null;
+  const lab = $('replayPreviewLabel');
+  if (lab) lab.textContent = '🔴 正在录制' + (cur && cur.sourceId ? ' · ' + cur.sourceId : '');
+}
+function updateReplayFids(list, status) {
+  replayFids = new Set();
+  for (const it of (list || [])) if (it && it.fid) replayFids.add(String(it.fid));
+  const up = status && status.uploader;
+  if (up && Array.isArray(up.queue)) for (const q of up.queue) if (q && q.fid) replayFids.add(String(q.fid));
+  if (archiveList && archiveList.length) renderArchive(archiveList); // 刷新对局档案的 📹 标记
+}
+
+async function refreshReplayList(fid) {
+  const el = $('replayList');
+  if (!el) return;
+  const q = (fid != null && fid !== '') ? String(fid) : '';
+  el.innerHTML = '<span class="dim">载入录像列表…</span>';
+  try {
+    const cloud = await BA.listReplays(q).catch(() => ({ list: [], error: null }));
+    const lr = await BA.listLocalReplays().catch(() => null);
+    const localList = (lr && lr.list) || [];
+    const list = [];
+    if (cloud && Array.isArray(cloud.list)) for (const it of cloud.list) list.push({ ...it, source: 'cloud' });
+    // 云端存储告警（免费上限 10GB，绝不自动删除）
+    (function () {
+      const w = $('replayStorageWarn');
+      if (!w) return;
+      let total = 0;
+      for (const it of cloud && cloud.list ? cloud.list : []) total += it.size || 0;
+      const gb = total / (1024 * 1024 * 1024);
+      if (gb >= replayWarnGb) {
+        w.classList.remove('hidden');
+        w.textContent = '⚠ 云端录像已用 ' + gb.toFixed(1) + ' GB（免费上限 10GB），请在录像列表手动清理；客户端绝不自动删除。';
+      } else {
+        w.classList.add('hidden');
+      }
+    })();
+    for (const it of localList) { if (q && String(it.fid) !== String(q)) continue; list.push({ ...it, source: 'local' }); }
+    if ((cloud && cloud.error) && !list.length) {
+      el.innerHTML = '<div class="replay-error">' + esc(cloud.error) + '</div>';
+      updateReplayFids([], null);
+      return;
+    }
+    renderReplayList(list);
+    BA.getReplayStatus().then((st) => updateReplayFids(list, st)).catch(() => updateReplayFids(list, null));
+  } catch (e) {
+    el.innerHTML = '<div class="replay-error">载入失败：' + esc(e.message) + '</div>';
+    updateReplayFids([], null);
+  }
+}
+function replayTeamTag(t) {
+  if (t === 0) return '<span class="r-team alpha">A 队</span>';
+  if (t === 1) return '<span class="r-team bravo">B 队</span>';
+  if (t === 100) return '<span class="r-team spec">观战</span>';
+  const team = String(t || '').toLowerCase();
+  if (team === 'alpha') return '<span class="r-team alpha">A 队</span>';
+  if (team === 'bravo') return '<span class="r-team bravo">B 队</span>';
+  if (team === 'spectators' || team === 'spec') return '<span class="r-team spec">观战</span>';
+  return '';
+}
+function fmtSize(n) {
+  if (n == null) return '';
+  const m = n / (1024 * 1024);
+  if (m >= 1) return m.toFixed(1) + ' MB';
+  return Math.round(n / 1024) + ' KB';
+}
+function renderReplayList(list) {
+  const el = $('replayList');
+  if (!el) return;
+  if (!list.length) { el.innerHTML = '<div class="replay-empty">暂无录像。开启「自动录制」后打一局，局结束会保存到本地，点「⬆ 上传」即可分享到云端。</div>'; return; }
+  const byFid = {};
+  for (const it of list) {
+    const k = String(it.fid || '未知');
+    (byFid[k] = byFid[k] || []).push(it);
+  }
+  // 按每组里最新一条录像的时间倒序（不能按对局ID数字排：测试录像ID是负数，数字排序会错乱）
+  const groupTime = (items) => items.reduce((m, it) => Math.max(m, Number(it.createdAt || it.endTime) || 0), 0);
+  const fids = Object.keys(byFid).sort((a, b) => groupTime(byFid[b]) - groupTime(byFid[a]));
+  el.innerHTML = fids.map((fid) => {
+    const items = byFid[fid];
+    const first = items[0] || {};
+    const rows = mergeReplayRows(items);
+    return `
+      <div class="replay-group">
+        <div class="replay-group-title">对局 ${esc(fid)} <span class="dim">${esc(first.map || '')} · ${fmtTime(first.createdAt || first.endTime)}</span></div>
+        ${rows.map((r) => replayRowHtml(r)).join('')}
+      </div>`;
+  }).join('');
+  bindReplayRows(el);
+}
+
+// 同一 (对局ID, 上传者) 的云端/本地合并为一行：云端下载到本地后显示 [☁ 云端][📁 本地] 双标签，播放优先本地
+function mergeReplayRows(items) {
+  const byUid = {};
+  for (const it of items) {
+    const k = String(it.uploaderId || '');
+    (byUid[k] = byUid[k] || []).push(it);
+  }
+  return Object.keys(byUid).map((uid) => {
+    const arr = byUid[uid];
+    const local = arr.find((x) => x.source === 'local') || null;
+    const cloud = arr.find((x) => x.source === 'cloud') || null;
+    const base = local || cloud;
+    return {
+      fid: base.fid,
+      name: (local && local.uploaderName) || (cloud && cloud.uploaderName) || '',
+      map: base.map || '',
+      team: base.team != null && base.team !== '' ? base.team : base.teamId,
+      teamId: base.teamId,
+      durationSec: base.durationSec,
+      size: base.size,
+      createdAt: base.createdAt || base.endTime,
+      source: local && cloud ? 'both' : local ? 'local' : 'cloud',
+      localId: local ? local.id : '',
+      cloudId: cloud ? cloud.id : '',
+      video: cloud ? cloud.videoUrl : ''
+    };
+  });
+}
+
+function replayRowHtml(r) {
+  const negative = String(r.fid || '').startsWith('-');
+  const badge = r.source === 'both' ? '<span class="r-src cloud">☁ 云端</span><span class="r-src local">📁 本地</span>'
+    : r.source === 'local' ? (negative ? '<span class="r-src test">🧪 测试</span>' : '<span class="r-src local">📁 本地</span>')
+    : '<span class="r-src cloud">☁ 云端</span>';
+  const canUpload = r.source === 'local' && !negative;
+  return `
+    <div class="replay-row" data-fid="${esc(r.fid)}" data-name="${esc(r.name)}" data-map="${esc(r.map)}" data-source="${r.source}" data-local="${esc(r.localId)}" data-cloud="${esc(r.cloudId)}" data-video="${esc(r.video)}" title="右键：打开位置 / 对局详情 / BATrace / 删除">
+      <span class="r-name">${esc(r.name || '未知')}</span>
+      ${badge}
+      ${replayTeamTag(r.team != null && r.team !== '' ? r.team : r.teamId)}
+      <span class="dim">${r.durationSec ? fmtDuration(r.durationSec) : '-'}</span>
+      <span class="dim">${fmtSize(r.size)}</span>
+      <span class="dim">${fmtTime(r.createdAt)}</span>
+      ${canUpload ? '<button class="btn btn-accent r-up" title="上传到服务器（可选）">⬆ 上传</button>' : ''}
+      <button class="btn btn-ghost r-play">▶ 播放</button>
+      <button class="r-del" title="删除这条录像">🗑</button>
+    </div>`;
+}
+
+function bindReplayRows(el) {
+  el.querySelectorAll('.replay-row').forEach((row) => {
+    const localId = row.dataset.local;
+    const cloudId = row.dataset.cloud;
+    row.querySelector('.r-play').addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (localId) {
+        try {
+          const r = await BA.readLocalReplay(localId);
+          if (r && r.ok) {
+            const blob = new Blob([r.data], { type: 'video/webm' });
+            const url = URL.createObjectURL(blob);
+            openReplayPlayer({ id: localId, videoUrl: url, fid: row.dataset.fid, name: row.dataset.name, map: row.dataset.map, isBlob: true });
+          } else { setStatus(((r && r.message) || '本地文件读取失败'), false); }
+        } catch (err) { setStatus('播放失败：' + err.message, false); }
+        return;
+      }
+      openReplayPlayer({ id: cloudId, videoUrl: row.dataset.video, fid: row.dataset.fid, name: row.dataset.name, map: row.dataset.map });
+      // 看过云端录像后缓存到本地（保留副本，断网也能看）→ 列表自动合并为 [云端][本地] 一行
+      if (row.dataset.video) BA.cacheRemoteReplay(cloudId, row.dataset.video).catch(() => {});
+    });
+    const upBtn = row.querySelector('.r-up');
+    if (upBtn) upBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      try {
+        const r = await BA.localUpload(localId);
+        setStatus((r && r.message) || '已加入上传队列', !!(r && r.ok));
+        BA.getReplayStatus().then(renderReplayStatus).catch(() => {});
+        refreshLocalReplayList();
+      } catch (err) { setStatus('上传失败：' + err.message, false); }
+    });
+    row.querySelector('.r-del').addEventListener('click', async (e) => {
+      e.stopPropagation();
+      await deleteReplayRow(row);
+    });
+  });
+}
+async function deleteReplayRow(row) {
+  // 合并行（云端+本地）默认只删本地副本，云端共享录像不会被动到
+  const src = row.dataset.source;
+  const localId = row.dataset.local;
+  const cloudId = row.dataset.cloud;
+  let msg, run;
+  if (src === 'both') {
+    msg = '确定删除这条本地录像吗？（云端录像不受影响，仍可在线观看）';
+    run = () => BA.deleteLocalReplay(localId);
+  } else if (src === 'local') {
+    msg = '确定删除这条本地录像吗？（不影响云端）';
+    run = () => BA.deleteLocalReplay(localId);
+  } else {
+    msg = '确定删除这条云端录像吗？（本地副本不受影响）';
+    run = () => BA.deleteReplay(cloudId);
+  }
+  const ok = await askConfirm(msg);
+  if (!ok) return;
+  try {
+    const r = await run();
+    setStatus((r && r.message) || '已删除', !!(r && r.ok));
+    refreshReplayList($('replaySearch').value.trim());
+  } catch (err) { setStatus('删除失败：' + err.message, false); }
+}
+
+// 显式删除云端共享录像（仅右键菜单触发，避免误删他人可见的录像）
+async function deleteCloudReplayRow(row) {
+  const cloudId = row.dataset.cloud || row.dataset.id;
+  if (!cloudId) return;
+  const ok = await askConfirm('确定删除这条云端录像吗？这是共享录像，删除后其他人也无法观看；本地副本不受影响。');
+  if (!ok) return;
+  try {
+    const r = await BA.deleteReplay(cloudId);
+    setStatus((r && r.message) || '已删除', !!(r && r.ok));
+    refreshReplayList($('replaySearch').value.trim());
+  } catch (err) { setStatus('删除失败：' + err.message, false); }
+}
+let replayBlobUrl = null;
+function openReplayPlayer(item) {
+  if (replayBlobUrl) { URL.revokeObjectURL(replayBlobUrl); replayBlobUrl = null; }
+  $('replayPlayTitle').textContent = '对局录像 #' + (item.fid || '');
+  $('replayPlayMeta').textContent = (item.name ? esc(item.name) + ' · ' : '') + esc(item.map || '');
+  const v = $('replayVideo');
+  v.src = item.videoUrl || '';
+  if (item.isBlob) replayBlobUrl = item.videoUrl;
+  $('replayModal').classList.remove('hidden');
+  const btns = document.querySelectorAll('.replay-speed-btn');
+  // 倍速档位 = 相对「实时(5 秒/帧)」的倍率：1x→playbackRate 5（默认）、2x→10、3x→15
+  const setRate = (r) => { v.playbackRate = r * 5; btns.forEach((b) => b.classList.toggle('active', Number(b.dataset.rate) === r)); };
+  btns.forEach((b) => { b.onclick = () => setRate(Number(b.dataset.rate)); });
+  setRate(1);
+  if (v.src) v.play().catch(() => {});
+}
+let displayPickResolve = null;
+function pickDisplay(list) {
+  return new Promise((resolve) => {
+    displayPickResolve = resolve;
+    const wrap = $('displayThumbs');
+    if (!wrap) { resolve(null); return; }
+    wrap.innerHTML = (list || []).map((d) => `
+      <div class="display-thumb" data-id="${esc(d.id)}">
+        ${d.thumb ? `<img src="${d.thumb}" alt=""/>` : '<div class="dim">（无缩略图）</div>'}
+        <div class="dim">${esc(d.label || d.id)}</div>
+      </div>`).join('');
+    $('displayPickerModal').classList.remove('hidden');
+    wrap.querySelectorAll('.display-thumb').forEach((el2) => el2.addEventListener('click', () => {
+      const id = el2.dataset.id;
+      $('displayPickerModal').classList.add('hidden');
+      if (displayPickResolve) { displayPickResolve(id); displayPickResolve = null; }
+    }));
+  });
+}
+
+let replayConfirmKey = null;
+function onConfirmUpload(d) {
+  replayConfirmKey = (d && d.key) || null;
+  const el = $('replayConfirmText');
+  if (!el) return;
+  el.innerHTML = '对局 <b>' + esc((d && d.fid) || '') + '</b>（' + esc((d && d.map) || '未知地图') + '，' + fmtSize(d && d.size) + '）已录制完成。<br>' +
+    '<span>选择「保存并上传」= 保存到本地并上传到服务器（别人可查看）；选择「稍后·保留本地」= 只留本地、之后再传。</span>';
+  const mm = $('replayConfirmModal');
+  if (mm) mm.classList.remove('hidden');
+}
+async function replayConfirm(action) {
+  const k = replayConfirmKey;
+  replayConfirmKey = null;
+  const mm = $('replayConfirmModal');
+  if (mm) mm.classList.add('hidden');
+  if (!k) return;
+  try {
+    const r = await BA.confirmUpload(action, k);
+    setStatus((r && r.message) || (action === 'upload' ? '已加入上传队列' : '已删除'), true);
+    refreshLocalReplayList();
+    refreshReplayList($('replaySearch').value.trim());
+  } catch (e) { setStatus('操作失败：' + e.message, false); }
+}
+
+function closeReplayPlayer() {
+  const v = $('replayVideo');
+  if (v) { v.pause(); v.src = ''; }
+  if (replayBlobUrl) { URL.revokeObjectURL(replayBlobUrl); replayBlobUrl = null; }
+  const rp = $('replayModal');
+  if (rp) rp.classList.add('hidden');
+}
+// 设置内：本地录像管理
+async function refreshLocalReplayList() {
+  const el = $('localReplayList');
+  const info = $('localReplayInfo');
+  try {
+    const r = await BA.listLocalReplays();
+    const list = (r && r.list) || [];
+    let total = 0;
+    for (const it of list) total += it.size || 0;
+    if (info) info.textContent = '共 ' + list.length + ' 条，' + fmtSize(total);
+    if (!el) return;
+    if (!list.length) { el.innerHTML = '<span class="dim">暂无本地录像。</span>'; return; }
+    el.innerHTML = list.slice(0, 100).map((it) => `
+      <div class="inv-item local-replay-item">
+        <span class="dim">${esc(it.fid)}</span>
+        <span>${esc(it.map || '未知地图')}</span>
+        <span class="dim">${fmtTime(it.createdAt)}</span>
+        <span class="dim">${fmtSize(it.size)}</span>
+        <button class="r-del" data-key="${esc(it.id)}" title="删除这条本地录像">🗑</button>
+      </div>`).join('');
+    el.querySelectorAll('.r-del').forEach((b) => b.addEventListener('click', async () => {
+      const ok = await askConfirm('确定删除这条本地录像吗？（不影响云端）');
+      if (!ok) return;
+      try {
+        const r = await BA.deleteLocalReplay(b.dataset.key);
+        $('localReplayResult').textContent = (r && r.message) || '已删除';
+        refreshLocalReplayList();
+        refreshReplayList($('replaySearch').value.trim());
+      } catch (e) { $('localReplayResult').textContent = '删除失败：' + e.message; }
+    }));
+  } catch (e) {
+    if (el) el.innerHTML = '<span class="dim">加载失败：' + esc(e.message) + '</span>';
+  }
+}
 
 // 封禁区：切换「我遇到过的作弊者」视图
 let banView = 'all';
@@ -1202,7 +1566,7 @@ async function refreshAccountList() {
 
 // ---------- 主题 ----------
 function applyTheme(name) {
-  const t = ['dark', 'light', 'cyan', 'orange'].includes(name) ? name : 'dark';
+  const t = ['dark', 'light', 'cyan', 'orange', 'violet', 'forest', 'ocean'].includes(name) ? name : 'dark';
   document.documentElement.dataset.theme = t;
   currentTheme = t;
 }
@@ -1303,7 +1667,8 @@ function bindUI() {
     if (dir) $('setLogDir').value = dir;
   });
   on('btnHeartbeatTest', 'click', async () => {
-    const url = $('setHeartbeatUrl').value.trim();
+    const cfg = await BA.getConfig().catch(() => null);
+    const url = (cfg && cfg.heartbeatUrl) || '';
     const el = $('heartbeatTest');
     el.textContent = '测试中…';
     try {
@@ -1394,6 +1759,11 @@ function bindUI() {
   on('btnTestMatchSync', 'click', async () => { const r = await BA.syncMyMatchesNow(); $('testResult').textContent = (r && r.message) || '未知'; });
   on('btnTestBanSync', 'click', async () => { const r = await BA.syncBans(); $('testResult').textContent = (r && r.newly != null) ? ('封禁检查完成，本次新增 ' + r.newly + ' 人') : '封禁检查完成'; });
   on('btnTestVersion', 'click', async () => { const r = await BA.testVersionUpdate(); $('testResult').textContent = (r && r.message) || '未知'; });
+  on('btnTestRecord', 'click', async () => {
+    $('testResult').textContent = '🎥 开始录制 60 秒（只存本地不上传），请切到游戏窗口…';
+    const r = await BA.testRecord();
+    if (!r || !r.ok) { $('testResult').textContent = '录制测试失败：' + ((r && r.message) || '未知'); return; }
+  });
 
   // 卡组工具
   on('btnDeckRefresh', 'click', refreshDecks);
@@ -1411,6 +1781,53 @@ function bindUI() {
   on('btnOpenBack', 'click', () => BA.openDeckFolder('backups'));
   enableToggleSelect($('deckFront'));
   enableToggleSelect($('deckBack'));
+
+  // 对局录像
+  on('btnReplayRefresh', 'click', () => refreshReplayList($('replaySearch').value.trim()));
+  on('btnReplaySearch', 'click', () => refreshReplayList($('replaySearch').value.trim()));
+  on('replaySearch', 'keydown', (e) => { if (e.key === 'Enter') refreshReplayList($('replaySearch').value.trim()); });
+  on('setReplayEnabled', 'change', async () => {
+    const el = $('setReplayEnabled');
+    if (el && el.checked) {
+      const ok = await askConfirm('开启后，每局会自动录制屏幕画面并保存到本地，你在「对局录像」列表点「⬆ 上传」才会上传分享。确定开启吗？');
+      if (!ok) { el.checked = false; return; }
+      // 每次开启都让用户选/确认游戏所在显示器（多屏时）
+      const list = await BA.listDisplays().catch(() => []);
+      if (list.length > 1) {
+        const picked = await pickDisplay(list);
+        if (!picked) { el.checked = false; return; } // 取消选择 → 不开启
+        await BA.setReplayDisplay(picked);
+      }
+    }
+    BA.setConfig({ replayEnabled: !!(el && el.checked) });
+    if (el && el.checked) refreshReplayList($('replaySearch').value.trim());
+  });
+  on('btnDisplayPickClose', 'click', () => { $('displayPickerModal').classList.add('hidden'); if (displayPickResolve) { displayPickResolve(null); displayPickResolve = null; } });
+  on('btnReplayConfirmUpload', 'click', () => replayConfirm('upload'));
+  on('btnReplayConfirmLater', 'click', () => replayConfirm('later'));
+  on('btnReplayConfirmClose', 'click', () => { replayConfirmKey = null; const mm = $('replayConfirmModal'); if (mm) mm.classList.add('hidden'); });
+  on('btnReplayClose', 'click', closeReplayPlayer);
+  on('btnLocalClean30', 'click', async () => {
+    const ok = await askConfirm('删除 30 天前的本地录像？（云端不受影响）');
+    if (!ok) return;
+    try {
+      const r = await BA.cleanLocalReplays(30);
+      $('localReplayResult').textContent = '已删除 ' + ((r && r.removed) || 0) + ' 条 30 天前的本地录像';
+      refreshLocalReplayList();
+      refreshReplayList($('replaySearch').value.trim());
+    } catch (e) { $('localReplayResult').textContent = '删除失败：' + e.message; }
+  });
+  on('btnOpenLocalReplay', 'click', () => { BA.openLocalReplayFolder(); });
+  on('btnLocalCleanAll', 'click', async () => {
+    const ok = await askConfirm('确定删除全部本地录像吗？（云端不受影响）');
+    if (!ok) return;
+    try {
+      const r = await BA.cleanLocalReplays(0);
+      $('localReplayResult').textContent = '已删除 ' + ((r && r.removed) || 0) + ' 条本地录像';
+      refreshLocalReplayList();
+      refreshReplayList($('replaySearch').value.trim());
+    } catch (e) { $('localReplayResult').textContent = '删除失败：' + e.message; }
+  });
 }
 
 async function saveSettings() {
@@ -1419,11 +1836,7 @@ async function saveSettings() {
   if (!v.ok) { $('dirHint').textContent = '目录无效：' + (v.reason || ''); return; }
   await BA.setConfig({
     logDir: dir,
-    pollMs: parseInt($('setPoll').value, 10) || 1500,
-    apiDelayMs: parseInt($('setDelay').value, 10) || 350,
     autoQueryCurrentMatch: $('setAuto').checked,
-    heartbeatEnabled: $('setHeartbeat').checked,
-    heartbeatUrl: $('setHeartbeatUrl').value.trim(),
     inputHookEnabled: $('setInputHook').checked,
     banPollEnabled: $('setBanPoll').checked,
     matchSyncEnabled: $('setMatchSync').checked,
@@ -1447,6 +1860,9 @@ async function init() {
   applyTheme(savedTheme);
   setApmVisible(!!cfg.inputHookEnabled);
   setBanCardVisible(!!cfg.banCardVisible);
+  const repSw = $('setReplayEnabled'); if (repSw) repSw.checked = !!cfg.replayEnabled;
+  if (cfg.replayWarnGb) replayWarnGb = Number(cfg.replayWarnGb) || 6;
+  refreshReplayList('');
   if (cfg.logDir) {
     const v = await BA.validateDir(cfg.logDir);
     setStatus(v.ok ? '监听中' : '目录无效：' + (v.reason || ''), v.ok);
@@ -1516,6 +1932,35 @@ async function init() {
   BA.getBans().then(renderBans).catch(() => {});
   BA.onBansChanged((d) => { if (banView === 'met') { banView = 'all'; const btn = $('btnBanCheaters'); if (btn) btn.textContent = '🔍 我遇到过的作弊者'; } renderBans(d && d.list); });
   BA.onBanAlert(renderBanAlert);
+  BA.onConfirmUpload(onConfirmUpload);
+  BA.onTestResult((d) => {
+    if (!d) return;
+    const el = $('testResult');
+    if (!el) return;
+    if (d.ok) { el.textContent = '✅ 录制测试完成：' + d.file + '（' + fmtSize(d.size) + '），已存本地，可在「本地录像管理」查看/删除'; refreshLocalReplayList(); }
+    else { el.textContent = '❌ 录制测试失败：' + (d.error || '未知'); }
+  });
+  BA.onRoomToolUsers((ids) => { toolUserIds = new Set((ids || []).map(String)); const cur = session && session.current; if (cur) renderMatchGrid(); else renderMatchGrid(); });
+  BA.onReplayRecording((d) => {
+    if (d && d.error) { const el = $('replayStatus'); if (el) { el.textContent = '⚠ 录制异常：' + d.error; el.title = '录制失败详情见 %APPDATA%/broken-arrow-log-assistant/replay.log'; } setReplayPreview(false); return; }
+    renderReplayStatus(d);
+    if (d && d.active) {
+      const cur = d.current || null;
+      const lab = $('replayPreviewLabel');
+      if (lab) lab.textContent = '🔴 正在录制' + (cur && cur.sourceId ? ' · ' + cur.sourceId : '');
+    } else {
+      setReplayPreview(false);
+    }
+  });
+  BA.onReplayProgress(() => { BA.getReplayStatus().then(renderReplayStatus).catch(() => {}); });
+  BA.onReplayChanged(() => { BA.getReplayStatus().then(renderReplayStatus).catch(() => {}); refreshReplayList($('replaySearch').value.trim()); });
+  // 预览只在真正出帧（开始录制）时显示，避免空框提前出现
+  BA.onReplayPreview((d) => {
+    const img = $('replayPreviewImg');
+    if (!img || !d || !d.dataUrl) return;
+    img.src = d.dataUrl;
+    setReplayPreview(true);
+  });
   // 点击玩家卡片 → 打开完整报告；📋 按钮 → 复制（上一局视图用 prevRows）
   $('teamGrid').addEventListener('click', (e) => {
     const rows = viewMode === 'prev' ? prevRows : matchRows;

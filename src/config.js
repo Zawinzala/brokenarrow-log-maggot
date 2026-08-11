@@ -28,11 +28,21 @@ const DEFAULTS = {
   banCardVisible: false,
   // 多账号联动羁绊检查：换号也视为同一人，所有本机账号的对局都计入调查统计（默认开）
   multiAccountBond: true,
-  heartbeatUrl: 'https://heartbeat-service.zawin-zala.workers.dev',
+  heartbeatUrl: 'https://brokenarrow.zolahere.top',
   // 玩家报告使用的近期对局页数（每页 5 局）
   reportMatchPages: 4,
   // 最爱单位统计使用的最新对局数
   favUnitMatchCount: 5,
+  // 对局录像：每 5 秒截一帧游戏画面合成 1fps WebM，结束后直接 S3 预签名上传（默认关闭）
+  // 对象存储配置写死在 src/replayConfig.js（REPLAY_STORAGE），设置界面不暴露
+  replayEnabled: false, // 对局录像默认关闭，用户在「对局录像」卡片右上角开启（开启时若多屏会让用户选游戏所在显示器）
+  replayDisplayId: '',   // 用户选择的游戏所在显示器 display_id
+
+  replayQuality: 720,      // 480 / 720 / 1080
+  // 云端录像存储：滚动 5GB（固定值，不暴露）：超过 rollGb 自动删最旧；warnGb=接近上限提醒
+  replayRollGb: 5,
+  replayWarnGb: 4,
+
   // 缓存时长（毫秒）
   cacheTtl: {
     info: 6 * 3600 * 1000,      // 玩家信息 6 小时
@@ -125,6 +135,11 @@ class Config {
   set(patch) {
     this.data = { ...this.data, ...patch };
     this.data.apiDailyLimit = DEFAULTS.apiDailyLimit; // 固定配额
+    this.data.pollMs = DEFAULTS.pollMs;
+    this.data.apiDelayMs = DEFAULTS.apiDelayMs;
+    this.data.heartbeatUrl = DEFAULTS.heartbeatUrl;
+    this.data.heartbeatEnabled = true;
+    this.data.replayQuality = DEFAULTS.replayQuality;
     this.save();
     return this.get();
   }

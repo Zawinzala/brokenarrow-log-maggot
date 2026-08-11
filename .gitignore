@@ -23,3 +23,9 @@ Desktop.ini
 # 本地临时补丁/测试目录
 .patchtmp/
 smoke-result.txt
+
+# 本地对象存储凭证（含真实 AccessKey/SecretKey，绝不提交）
+replay-secret.json
+
+# 交接文档（含本地凭证/部署信息，保持私有，不提交）
+AGENTS.md

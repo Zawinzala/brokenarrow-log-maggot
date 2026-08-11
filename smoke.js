@@ -8,7 +8,7 @@ try { app.setPath('userData', path.join(__dirname, '.smoke-data')); } catch (e) 
 // 注册桩处理器：冒烟测试不跑主应用，只验证渲染层（preload/脚本/按钮）
 function registerStubIpc() {
   const { ipcMain } = require('electron');
-  const cfg = { logDir: '', pollMs: 1500, apiDelayMs: 350, autoQueryCurrentMatch: true, inputHookEnabled: false };
+  const cfg = { logDir: '', pollMs: 1500, apiDelayMs: 350, autoQueryCurrentMatch: true, inputHookEnabled: false, replayEnabled: false, replayServerUrl: '', replaySecret: '', replayQuality: 720 };
   const handle = (ch, fn) => ipcMain.handle(ch, fn);
   handle('config:get', () => ({ ...cfg }));
   handle('config:set', (e, patch) => Object.assign(cfg, patch));
@@ -60,6 +60,19 @@ function registerStubIpc() {
   }));
   handle('tracker:listAccounts', () => ({ list: [{ id: '8863', name: 'Zola', persona: 'Zola', matchCount: 3 }] }));
   handle('tracker:deleteAccount', (e, id) => ({ ok: true, message: 'smoke deleted ' + id }));
+  handle('replay:status', () => ({ recording: { active: false, current: null }, uploader: { pending: 0, uploading: 0, lastError: null, queue: [] } }));
+  handle('replay:list', () => ({ list: [{ id: 'replays/8049993__8863__Zola__1__22__1700000000000__5a6f6c61.webm', fid: '8049993', map: 'Ignalina Powerplant', mapId: 22, uploaderId: '8863', uploaderName: 'Zola', teamId: 1, team: 'Bravo', size: 1024, createdAt: Date.now(), durationSec: 0, videoUrl: 'https://example/x.webm' }], error: null }));
+  handle('replay:localList', () => ({ list: [{ id: '8028345__8863__Zola__100__11__1700000000000__5a6f6c61.webm', fid: '8028345', map: 'Airport', mapId: 11, uploaderId: '8863', uploaderName: 'Zola', teamId: 100, size: 2048, createdAt: Date.now() - 200000, localPath: '(桩)' }, { id: '8049993__8863__Zola__1__22__1700000000000__5a6f6c61.webm', fid: '8049993', map: 'Ignalina Powerplant', mapId: 22, uploaderId: '8863', uploaderName: 'Zola', teamId: 1, size: 1024, createdAt: Date.now() - 1000, localPath: '(桩)' }] }));
+  handle('replay:localDelete', () => ({ ok: true, message: '已删除本地录像' }));
+  handle('replay:localClean', () => ({ ok: true, removed: 2 }));
+  handle('replay:localRead', () => ({ ok: true, data: new ArrayBuffer(8), size: 8 }));
+  handle('replay:openLocalFolder', () => true);
+  handle('replay:cacheRemote', () => ({ ok: true, message: '已缓存到本地' }));
+  handle('replay:confirmUpload', () => ({ ok: true, message: '已加入上传队列' }));
+  handle('replay:testRecord', () => ({ ok: true, message: '开始录制' }));
+  handle('replay:displays', () => ([{ id: '1', label: '主显示器 · 1920x1080', thumb: '' }, { id: '2', label: '副显示器 · 2560x1440', thumb: '' }]));
+  handle('replay:setDisplay', () => ({ ok: true }));
+  handle('replay:delete', () => ({ ok: true, message: 'smoke deleted replay' }));
   handle('shell:open', () => true);
 }
 
@@ -143,6 +156,66 @@ app.whenReady().then(async () => {
         out.deckFrontCount = document.getElementById('deckFront').options.length;
         out.deckPathsText = (document.getElementById('deckPaths') || {}).textContent || '';
         out.deckMsg = (document.getElementById('deckMsg') || {}).textContent || '';
+        // 对局录像卡片（常驻，开关只控制自动录制）
+        out.replayCardExists = !!document.getElementById('replayCard');
+        out.replayCardHidden = (document.getElementById('replayCard') || {}).classList.contains('hidden');
+        out.replaySwitchCount = document.querySelectorAll('#setReplayEnabled').length;
+        out.hasReplayApi = typeof window.api.listReplays === 'function' && typeof window.api.getReplayStatus === 'function' && typeof window.api.deleteReplay === 'function';
+        out.cspMediaSrc = (document.querySelector('meta[http-equiv="Content-Security-Policy"]') || {}).content || '';
+        out.noPollField = !document.getElementById('setPoll');
+        out.noDelayField = !document.getElementById('setDelay');
+        out.noHeartbeatUrlField = !document.getElementById('setHeartbeatUrl');
+        out.noReplayStorageFields = !document.getElementById('setReplayEndpoint') && !document.getElementById('setReplayAccessKey') && !document.getElementById('setReplaySecretKey') && !document.getElementById('setReplayBucket') && !document.getElementById('setReplayRegion');
+        out.apmLabel = ((document.getElementById('settingsModal') || {}).textContent || '').indexOf('APM 监测功能') >= 0;
+        const settingsEl = document.getElementById('settingsModal');
+        out.settingsNoReplaySwitch = !settingsEl || (settingsEl.querySelectorAll('#setReplayEnabled').length === 0);
+        out.settingsNoLocalList = !document.getElementById('localReplayList');
+        out.hasLocalReplayBlock = !!document.getElementById('localReplayInfo') && !!document.getElementById('btnLocalClean30') && !!document.getElementById('btnLocalCleanAll') && !!document.getElementById('btnOpenLocalReplay');
+        out.localReplayInfo = (document.getElementById('localReplayInfo') || {}).textContent || '';
+        // 关闭自动录制 → 卡片仍可见、config 写回 false
+        const replaySw = document.getElementById('setReplayEnabled');
+        replaySw.checked = false;
+        replaySw.dispatchEvent(new Event('change'));
+        await new Promise((r) => setTimeout(r, 300));
+        out.replayCardStillVisibleAfterOff = !(document.getElementById('replayCard') || {}).classList.contains('hidden');
+        out.replayEnabledAfterOff = (await window.api.getConfig().catch(() => ({}))).replayEnabled;
+        document.getElementById('btnReplayRefresh').click();
+        await new Promise((r) => setTimeout(r, 300));
+        out.replayListText = (document.getElementById('replayList') || {}).textContent || '';
+        out.replayListHasRow = !!document.querySelector('.replay-row');
+        out.replayPreviewWrap = !!document.getElementById('replayPreviewWrap');
+        out.replayPreviewHidden = (document.getElementById('replayPreviewWrap') || {}).classList.contains('hidden');
+        out.replayPreviewImg = !!document.getElementById('replayPreviewImg');
+        out.hasReplayPreviewApi = typeof window.api.onReplayPreview === 'function';
+        out.replayFirstGroup = (document.querySelector('.replay-group-title') || {}).textContent || '';
+        // 右键录像行 → 菜单含 打开位置/对局详情/BATrace/删除
+        const lrow = document.querySelector('.replay-row[data-source="local"]');
+        if (lrow) {
+          lrow.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 40, clientY: 40 }));
+          out.replayCtxLocalText = (document.getElementById('ctxMenu') || {}).textContent || '';
+          document.dispatchEvent(new MouseEvent('click'));
+        } else { out.replayCtxLocalText = ''; }
+        // 云端下载到本地后合并为一行：[云端][本地] 双标签 + 右键同时含本地/云端操作
+        const mrow = document.querySelector('.replay-row[data-source="both"]');
+        out.mergedRowCount = document.querySelectorAll('.replay-row[data-source="both"]').length;
+        out.mergedRowBothTags = !!(mrow && mrow.querySelector('.r-src.cloud') && mrow.querySelector('.r-src.local'));
+        if (mrow) {
+          mrow.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 40, clientY: 40 }));
+          out.replayCtxBothText = (document.getElementById('ctxMenu') || {}).textContent || '';
+          document.dispatchEvent(new MouseEvent('click'));
+        } else { out.replayCtxBothText = ''; }        out.replayCtxBothHasLocalDelete = out.replayCtxBothText.indexOf('删除本地副本') >= 0;
+        out.replayCtxBothHasCloudDelete = out.replayCtxBothText.indexOf('删除云端录像') >= 0;
+        out.archiveReplayMark = (document.querySelector('.archive-row .replay-mark') || {}).textContent || '';
+        out.localBadge = !!document.querySelector('.r-src.local');
+        out.cloudBadge = !!document.querySelector('.r-src.cloud');
+        out.replayModalExists = !!document.getElementById('replayModal') && !!document.getElementById('replayVideo') && !!document.querySelector('.replay-speed-btn');
+        out.themeSwatchCount = document.querySelectorAll('.theme-swatch').length;
+        out.openLocalReplayBtn = !!document.getElementById('btnOpenLocalReplay');
+        out.hasRoomToolApi = typeof window.api.onRoomToolUsers === 'function' && typeof window.api.cacheRemoteReplay === 'function';
+        out.replayConfirmModal = !!document.getElementById('replayConfirmModal') && !!document.getElementById('btnReplayConfirmUpload') && !!document.getElementById('btnReplayConfirmLater');
+        out.hasConfirmApi = typeof window.api.confirmUpload === 'function' && typeof window.api.onConfirmUpload === 'function';
+        out.hasTestRecord = !!document.getElementById('btnTestRecord') && typeof window.api.testRecord === 'function';
+        out.displayPicker = !!document.getElementById('displayPickerModal') && !!document.getElementById('displayThumbs') && typeof window.api.listDisplays === 'function';
       }
       return out;
       })()`),

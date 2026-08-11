@@ -63,6 +63,29 @@ contextBridge.exposeInMainWorld('api', {
   deleteAccount: (id) => ipcRenderer.invoke('tracker:deleteAccount', id),
   onMatchesChanged: (cb) => ipcRenderer.on('matches:changed', (e, d) => cb(d)),
 
+  // 对局录像（对象存储直传）
+  getReplayStatus: () => ipcRenderer.invoke('replay:status'),
+  listReplays: (fid) => ipcRenderer.invoke('replay:list', fid),
+  deleteReplay: (id) => ipcRenderer.invoke('replay:delete', id),
+  listLocalReplays: () => ipcRenderer.invoke('replay:localList'),
+  deleteLocalReplay: (key) => ipcRenderer.invoke('replay:localDelete', key),
+  localUpload: (key) => ipcRenderer.invoke('replay:localUpload', key),
+  cleanLocalReplays: (days) => ipcRenderer.invoke('replay:localClean', days),
+  readLocalReplay: (key) => ipcRenderer.invoke('replay:localRead', key),
+  openLocalReplayFolder: () => ipcRenderer.invoke('replay:openLocalFolder'),
+  cacheRemoteReplay: (key, url) => ipcRenderer.invoke('replay:cacheRemote', { key, url }),
+  confirmUpload: (action, key) => ipcRenderer.invoke('replay:confirmUpload', { action, key }),
+  onConfirmUpload: (cb) => ipcRenderer.on('replay:confirmUpload', (e, d) => cb(d)),
+  testRecord: () => ipcRenderer.invoke('replay:testRecord'),
+  listDisplays: () => ipcRenderer.invoke('replay:displays'),
+  setReplayDisplay: (id) => ipcRenderer.invoke('replay:setDisplay', id),
+  onTestResult: (cb) => ipcRenderer.on('replay:testResult', (e, d) => cb(d)),
+  onRoomToolUsers: (cb) => ipcRenderer.on('room:toolusers', (e, d) => cb(d)),
+  onReplayRecording: (cb) => ipcRenderer.on('replay:recording', (e, d) => cb(d)),
+  onReplayPreview: (cb) => ipcRenderer.on('replay:preview', (e, d) => cb(d)),
+  onReplayProgress: (cb) => ipcRenderer.on('replay:progress', (e, d) => cb(d)),
+  onReplayChanged: (cb) => ipcRenderer.on('replay:changed', (e, d) => cb(d)),
+
   // 外部链接
   openExternal: (url) => ipcRenderer.invoke('shell:open', url),
 

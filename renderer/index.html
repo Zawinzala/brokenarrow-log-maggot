@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:; connect-src 'self'" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:; media-src 'self' blob: data: https://brokenarrowreplay.zolahere.top; connect-src 'self'" />
   <title>断箭蛆工具 byZola</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
@@ -60,7 +60,7 @@
         </div>
       </div>
       <div id="apmBody" class="apm-body">
-        <div class="apm-empty dim">对局开始后自动统计：仅记录游戏窗口在前台时的鼠标点击与键盘按键（全局只读钩子，不模拟、不拦截任何输入）。默认关闭，需在「设置」中开启「真实输入统计」。对局结束自动生成每分钟操作图。</div>
+        <div class="apm-empty dim">对局开始后自动统计：仅记录游戏窗口在前台时的鼠标点击与键盘按键（全局只读钩子，不模拟、不拦截任何输入）。默认关闭，需在「设置」中开启「APM 监测功能」。对局结束自动生成每分钟操作图。</div>
       </div>
     </section>
 
@@ -144,6 +144,33 @@
       <div id="banList" class="ban-list"></div>
     </section>
 
+    <!-- 对局录像（屏幕截屏合成 WebM，上传对象存储；卡片常驻，开关只控制自动录制） -->
+    <section class="card" id="replayCard">
+      <div class="card-head">
+        <h2>📹 对局录像——本地保存+云端共享</h2>
+        <div class="head-right">
+          <span id="replayStatus" class="dim"></span>
+          <span class="dim" style="font-size:12px">自动录制</span>
+          <label class="switch"><input id="setReplayEnabled" type="checkbox" checked /><span class="slider"></span></label>
+          <button id="btnReplayRefresh" class="btn btn-ghost">↻ 刷新列表</button>
+        </div>
+      </div>
+      <div id="replayPreviewWrap" class="replay-preview hidden">
+        <div class="replay-preview-head">
+          <span id="replayPreviewLabel" class="dim">🔴 正在录制</span>
+          <span class="dim" style="margin-left:auto;font-size:11px">每秒刷新 · 录制时显示</span>
+        </div>
+        <img id="replayPreviewImg" alt="录制预览" />
+      </div>
+      <div class="search-row">
+        <input id="replaySearch" type="text" placeholder="按对局 ID 搜索（留空显示最近录像）" />
+        <button id="btnReplaySearch" class="btn">查询</button>
+      </div>
+      <div class="replay-note dim">每 5 秒截一帧游戏画面合成 1fps WebM，开启「自动录制」后每局自动录，局结束会弹窗确认「保存并上传 / 稍后」，也可手动 ⬆ 上传；有录像的对局会在「对局档案」里标 📹。</div>
+      <div id="replayStorageWarn" class="replay-warn hidden"></div>
+      <div id="replayList" class="replay-list"></div>
+    </section>
+
     <!-- 对局档案 + 关于（同栏两列） -->
     <div class="split">
       <section class="card">
@@ -191,30 +218,36 @@
         <button id="btnDetect" class="btn btn-ghost">自动检测 Steam 目录</button>
         <span id="dirHint" class="dim"></span>
       </div>
-      <label>监听轮询间隔（毫秒）</label>
-      <input id="setPoll" type="number" min="500" max="10000" step="100" />
-      <label>API 请求间隔（毫秒，越小越快但容易被限）</label>
-      <input id="setDelay" type="number" min="100" max="3000" step="50" />
       <label class="check"><input id="setAuto" type="checkbox" /> 检测到对局后自动粗查玩家</label>
-      <label class="check"><input id="setInputHook" type="checkbox" /> 真实输入统计（全局鼠标+键盘钩子，只读不拦截；默认关闭，开启前请自行评估反作弊风险）</label>
-      <label class="check"><input id="setHeartbeat" type="checkbox" /> 加入使用统计（只上报匿名 ID + 版本号，用于统计在线人数，可随时关闭）</label>
-      <label>统计服务地址（一般无需修改）</label>
-      <div class="search-row">
-        <input id="setHeartbeatUrl" type="text" placeholder="https://heartbeat-service.zawin-zala.workers.dev" />
+      <label class="check"><input id="setInputHook" type="checkbox" /> APM 监测功能（全局鼠标+键盘钩子，只读不拦截；默认关闭，开启前请自行评估反作弊风险）</label>
+      <div class="row">
         <button id="btnHeartbeatTest" class="btn btn-ghost">测试心跳</button>
+        <span id="heartbeatTest" class="dim"></span>
       </div>
-      <div id="heartbeatTest" class="dim"></div>
       <label>主题</label>
       <div class="theme-picker" id="themePicker">
         <button type="button" class="theme-swatch" data-theme="dark" title="黑色（深色）"><i style="background:#0d1017"></i><span>黑</span></button>
         <button type="button" class="theme-swatch" data-theme="light" title="白色（亮色）"><i style="background:#f2f4f8"></i><span>白</span></button>
         <button type="button" class="theme-swatch" data-theme="cyan" title="青色（亮色）"><i style="background:#cffafe"></i><span>青</span></button>
         <button type="button" class="theme-swatch" data-theme="orange" title="橙色（亮色）"><i style="background:#ffedd5"></i><span>橙</span></button>
+        <button type="button" class="theme-swatch" data-theme="violet" title="紫夜（暗色+紫罗兰）"><i style="background:#a78bfa"></i><span>紫夜</span></button>
+        <button type="button" class="theme-swatch" data-theme="forest" title="深林（暗色+松绿）"><i style="background:#34d399"></i><span>深林</span></button>
+        <button type="button" class="theme-swatch" data-theme="ocean" title="深海（暗色+天蓝）"><i style="background:#38bdf8"></i><span>深海</span></button>
       </div>
       <label class="check"><input id="setBanPoll" type="checkbox" /> 封禁监控（每小时检查封禁名单，发现新封弹窗提醒）</label>
       <label class="check"><input id="setMatchSync" type="checkbox" /> 每小时同步我的对局记录（用于玩家追踪回填相遇/胜负/改名史）</label>
       <label class="check"><input id="setBanCard" type="checkbox" /> 显示封禁追踪栏目（默认隐藏）</label>
       <label class="check"><input id="setMultiBond" type="checkbox" /> 多账号联动羁绊检查（换号也视为同一人，默认开）</label>
+      <div class="replay-local-block">
+        <div class="test-title dim">📼 本地录像管理（上传到云端的录像会保留本地副本；这里的清理只删本地，不影响云端）</div>
+        <div id="localReplayInfo" class="dim"></div>
+        <div class="search-row" style="flex-wrap:wrap">
+          <button type="button" id="btnLocalClean30" class="btn btn-ghost">删除 30 天前</button>
+          <button type="button" id="btnOpenLocalReplay" class="btn btn-ghost">📂 打开本地录像位置</button>
+          <button type="button" id="btnLocalCleanAll" class="btn btn-danger">删除全部本地录像</button>
+        </div>
+        <div id="localReplayResult" class="dim"></div>
+      </div>
       <div class="accounts-block">
         <div class="test-title dim">👥 账号数据管理（删除会同时清理该账号的对局/相遇数据与卡组归档文件夹）</div>
         <div id="accountList" class="inv-list"></div>
@@ -226,6 +259,7 @@
           <button type="button" id="btnTestMatchSync" class="btn btn-ghost">立即同步我的对局</button>
           <button type="button" id="btnTestBanSync" class="btn btn-ghost">立即检查封禁</button>
           <button type="button" id="btnTestVersion" class="btn btn-ghost">测试版本更新推送</button>
+          <button type="button" id="btnTestRecord" class="btn btn-ghost">🎥 录制测试（1 分钟·不上传）</button>
         </div>
         <div id="testResult" class="dim"></div>
       </div>
@@ -280,6 +314,51 @@
         <canvas id="matchGame" width="720" height="420"></canvas>
       </div>
       <div id="matchDetailBody" class="inv-section"></div>
+    </div>
+  </div>
+
+  <!-- 录像上传确认弹窗 -->
+  <div id="replayConfirmModal" class="modal hidden">
+    <div class="modal-box small">
+      <div class="inv-head">
+        <span class="inv-name">🎬 检测到一局录像</span>
+        <button id="btnReplayConfirmClose" class="btn btn-ghost" style="margin-left:auto">✕</button>
+      </div>
+      <div id="replayConfirmText" class="dim" style="font-size:13px;line-height:1.8"></div>
+      <div class="modal-actions">
+        <button id="btnReplayConfirmUpload" class="btn btn-primary">💾 保存并上传</button>
+        <button id="btnReplayConfirmLater" class="btn btn-ghost">⏸ 稍后·保留本地</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 选择游戏所在显示器 -->
+  <div id="displayPickerModal" class="modal hidden">
+    <div class="modal-box">
+      <div class="inv-head">
+        <span class="inv-name">🖥 选择游戏所在显示器</span>
+        <button id="btnDisplayPickClose" class="btn btn-ghost" style="margin-left:auto">✕</button>
+      </div>
+      <div class="dim" style="font-size:12px;line-height:1.6;margin-bottom:8px">检测到多个显示器。请点选你打游戏的那块屏（之后对局录像固定录它）。</div>
+      <div id="displayThumbs" class="display-thumbs"></div>
+    </div>
+  </div>
+
+  <!-- 对局录像播放弹窗 -->
+  <div id="replayModal" class="modal hidden">
+    <div class="modal-box wide replay-video-box">
+      <div class="inv-head">
+        <span class="inv-name" id="replayPlayTitle">对局录像</span>
+        <span class="dim" id="replayPlayMeta"></span>
+        <button id="btnReplayClose" class="btn btn-ghost" style="margin-left:auto">✕</button>
+      </div>
+      <div class="replay-speed dim">播放速度：
+        <button type="button" class="btn btn-ghost replay-speed-btn active" data-rate="1">1x</button>
+        <button type="button" class="btn btn-ghost replay-speed-btn" data-rate="2">2x</button>
+        <button type="button" class="btn btn-ghost replay-speed-btn" data-rate="3">3x</button>
+        <span class="dim">（默认 1x = 按实际 5 秒/帧的实时速度；3x = 15 倍速快速复盘）</span>
+      </div>
+      <video id="replayVideo" controls autoplay playsinline style="width:100%;max-height:70vh;background:#000;border-radius:10px;border:1px solid var(--line)"></video>
     </div>
   </div>
 

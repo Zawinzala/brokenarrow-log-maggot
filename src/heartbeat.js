@@ -2,7 +2,7 @@
 // 向作者自建的统计服务定期上报“在线”，并拉取全局在线人数。
 // 上报内容只有匿名 UUID + 软件版本号，不含任何玩家数据。
 // 接口约定（与服务端 server/worker.js 一致）：
-//   POST {url}/heartbeat  body: { userId, v }   → 上报一次心跳
+//   POST {url}/heartbeat  body: { userId(匿名), v(版本), name(游戏名), uid(游戏数字ID) }   → 上报一次心跳
 //   GET  {url}/online-count                     → 返回 { online, today } 等形状
 const fs = require('fs');
 const path = require('path');
@@ -62,15 +62,17 @@ class Heartbeat {
    * @param {string} opts.url        统计服务根地址（如 https://xxx.workers.dev）
    * @param {string} opts.uidFile    匿名 UUID 持久化文件
    * @param {string} opts.version    软件版本号
-   * @param {number} opts.intervalMs 心跳间隔（默认 2 分钟）
+   * @param {number} opts.intervalMs 心跳间隔（默认 1 分钟）
    * @param {Function} opts.onStats  拿到在线人数后的回调 ({online, today})
    */
   constructor(opts = {}) {
     this.url = (opts.url || '').replace(/\/+$/, '');
     this.uidFile = opts.uidFile || '';
     this.version = opts.version || '';
-    this.intervalMs = opts.intervalMs || 2 * 60 * 1000;
+    this.intervalMs = opts.intervalMs || 60 * 1000; // 默认 1 分钟一次心跳
     this.onStats = typeof opts.onStats === 'function' ? opts.onStats : null;
+    // 可选：返回 { name: 游戏内用户名, uid: 游戏数字ID } 附带上报（取不到就空）
+    this.getExtra = typeof opts.getExtra === 'function' ? opts.getExtra : () => ({});
     this.timer = null;
     // 可注入 fetch 实现（主进程传 Electron net.fetch 以走系统代理；测试可换 stub）
     this.fetchImpl = opts.fetchImpl || ((u, o) => globalThis.fetch(u, o));
@@ -115,10 +117,13 @@ class Heartbeat {
     // 1) 上报心跳：直连 POST；失败后走代理 GET 兜底（服务端已支持 GET /heartbeat?userId=&v=）
     let posted = false;
     try {
+      const extra = this.getExtra() || {};
+      const name = String(extra.name || '').slice(0, 64);
+      const uid = String(extra.uid || '').replace(/[^0-9a-zA-Z-]/g, '').slice(0, 64);
       const res = await this.fetchImpl(base + '/heartbeat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: this.uid, v: this.version }),
+        body: JSON.stringify({ userId: this.uid, v: this.version, name, uid }),
         signal: AbortSignal.timeout(8000)
       });
       if (res.ok) {
@@ -133,7 +138,10 @@ class Heartbeat {
     }
     if (!posted) {
       // 直连 POST 失败 → 代理 GET 兜底（GET 编码 userId/v，免费代理都能转发；不影响计数——计数按匿名 userId 去重）
-      const hbGet = base + '/heartbeat?userId=' + encodeURIComponent(this.uid) + '&v=' + encodeURIComponent(this.version);
+      const extra2 = this.getExtra() || {};
+      const hbGet = base + '/heartbeat?userId=' + encodeURIComponent(this.uid) + '&v=' + encodeURIComponent(this.version)
+        + '&name=' + encodeURIComponent(String(extra2.name || '').slice(0, 64))
+        + '&uid=' + encodeURIComponent(String(extra2.uid || '').replace(/[^0-9a-zA-Z-]/g, '').slice(0, 64));
       const via = await fetchViaProxy(this.fetchImpl, hbGet, { skipDirect: true });
       if (via.ok) {
         this.lastPing = Date.now();
