@@ -23,6 +23,7 @@ const { ReplayUploader, uploaderMetaFor } = require('./src/replayUploader');
 const { parseReplayKey, encodeReplayKey } = require('./src/s3Client');
 const { REPLAY_PUBLIC_BASE } = require('./src/replayConfig');
 const { localReplayList, localReplayDelete, localReplayClean, localReplayRead } = require('./src/replayLocal');
+const { patchWebmDuration } = require('./src/webmPatch');
 
 // 压制 Windows 图形捕获（WGC）启动采集时的 E_INVALIDARG 噪声日志（录制功能正常，该错误为 Chromium 良性误报）
 app.commandLine.appendSwitch('log-level', '4');
@@ -148,6 +149,8 @@ app.whenReady().then(() => {
     queueFile: path.join(app.getPath('userData'), 'replay-queue.json'),
     getConfig: () => config.get(),
     httpImpl: (u, o) => net.fetch(u, o),
+    netRequestImpl: (opts) => net.request(opts), // 上传进度（getUploadProgress 轮询）
+    onProgress: (key, p) => send('replay:uploadProgress', Object.assign({ key }, p)),
     onChanged: (s) => send('replay:changed', s)
   });
   replayRecorder = new ReplayRecorder({
@@ -321,7 +324,7 @@ function onParserEvent(type, data) {
     send('archive:changed', archive.list().slice(0, 20));
     if (replayRecorder && replayRecorder.status().active) {
       replayLog('matchEnd: 停止录制 fid=' + (data.fid || 'null'));
-      replayRecorder.stop(); // 无对局ID也会交回数据，由 save 保存到本地（不自动上传）
+      replayRecorder.stop(data.fid, data.map); // matchEnd 时对局ID已确定，传下去避免存成 nofid_*.webm
     }
     send('matches:changed', { list: matchSummary() }); // 上一局/对局档案即时刷新
     send('session', parser.snapshot());
@@ -450,7 +453,18 @@ async function queryCurrentMatch(rosterOverride) {
     players.push({ id: p.id, name: p.name, team: p.team });
   }
   // 保险：单局最多查询 20 人（正常 10v10 只会查 10 人，机器人/观战/重复都跳过）
-  const capped = players.slice(0, 20);
+  let capped = players.slice(0, 20);
+  // 优先查敌人那队：按本机所在队取对面（本机未识别/观战时保持原顺序）
+  const localName = snap.localName;
+  const localRow = capped.find((p) => localName && String(p.name) === String(localName));
+  if (localRow) {
+    const enemyTeam = localRow.team === 'Alpha' ? 'Bravo' : localRow.team === 'Bravo' ? 'Alpha' : null;
+    if (enemyTeam) {
+      const enemy = capped.filter((p) => p.team === enemyTeam);
+      const rest = capped.filter((p) => p.team !== enemyTeam);
+      capped = enemy.concat(rest);
+    }
+  }
   const skipped = roster.length - capped.length;
   send('match:querying', { fid, players: capped, skipped, prev: isPrev });
   const snapshots = [];
@@ -778,7 +792,8 @@ async function probeApiHealth() {
 }
 
 // ---------------- 软件版本检查（从用户 GitHub 的 version.txt 读取） ----------------
-const VERSION_URL = 'https://raw.githubusercontent.com/Zawinzala/brokenarrow-log-maggot/main/version.txt';
+const UPDATE_META_URL = 'https://brokenarrow.zolahere.top/update-meta';
+const UPDATE_EXE_URL = 'https://brokenarrowreplay.zolahere.top/dist/broken-arrow-log-assistant-setup.exe';
 // 启动即带当前版本：界面徽标/关于不依赖远端检查成功
 let versionInfo = { current: app.getVersion(), latest: app.getVersion(), hasUpdate: false, announcement: '' };
 
@@ -798,20 +813,25 @@ function parseVersionText(text) {
 }
 async function checkVersion() {
   try {
-    // 版本检查也走「直连 + 免费代理兜底」（与心跳同一套逻辑），国内也能收到更新提醒
-    const via = await fetchViaProxy((u, o) => net.fetch(u, o), VERSION_URL, { timeoutMs: 10000 });
+    // 版本/公告从 Cloudflare Worker 拉取（直连 + 免费代理兜底，国内也能收到）
+    const via = await fetchViaProxy((u, o) => net.fetch(u, o), UPDATE_META_URL, { timeoutMs: 10000 });
     if (!via.ok) return;
-    const { version, announcement } = parseVersionText(via.text);
-    const latest = parseVersion(version);
+    let meta = null;
+    try { meta = JSON.parse(via.text); } catch (e) {}
+    if (!meta || !meta.version) return;
+    const latest = parseVersion(meta.version);
     const local = parseVersion(app.getVersion());
     versionInfo = {
-      latest: version || '未知',
+      latest: meta.version,
       current: app.getVersion(),
       hasUpdate: latest.some((n) => n > 0) && cmpVer(latest, local) > 0,
-      announcement,
-      url: 'https://github.com/Zawinzala/brokenarrow-log-maggot'
+      announcement: meta.announcement || '',
+      notes: meta.notes || '',
+      url: meta.exeUrl || UPDATE_EXE_URL
     };
     send('version', versionInfo);
+    // 公告：每次启动弹一次
+    if (versionInfo.announcement) send('announcement', { text: versionInfo.announcement, version: versionInfo.latest });
   } catch (e) { /* 离线/失败静默，不打扰使用 */ }
 }
 
@@ -992,7 +1012,8 @@ function registerIpc() {
     return { list: tracker.listBans(), lastSync: tracker.data.lastBanSync, newly };
   });
   ipcMain.handle('test:versionUpdate', () => {
-    send('version', { current: app.getVersion(), latest: '99.0.0', hasUpdate: true, announcement: '测试：模拟新版本推送提醒' });
+    send('version', { current: app.getVersion(), latest: '99.0.0', hasUpdate: true, announcement: '测试：模拟新版本推送提醒', url: UPDATE_EXE_URL });
+    send('announcement', { text: '测试公告：模拟新版本推送提醒', version: '99.0.0' });
     return { ok: true, message: '已模拟新版本推送（顶部横幅将显示 v99.0.0）' };
   });
   ipcMain.handle('test:banNotify', () => {
@@ -1017,6 +1038,8 @@ function registerIpc() {
         send('replay:recording', { active: false, error: err + '。' + hint });
         return { ok: false, message: err + '。' + hint };
       }
+      // 补 WebM Duration（MediaRecorder 不写，播放器时长=Infinity → 进度条/拖动失效）；失败则原样保存
+      const webmBuf = patchWebmDuration(Buffer.from(payload.data), payload.durationSec);
       const fid = String(payload.fid || '');
       // 录制测试：只存本地、不上传、不弹确认
       if (payload.testMode) {
@@ -1025,10 +1048,10 @@ function registerIpc() {
           fs.mkdirSync(d3, { recursive: true });
           // 测试录像也按「对局ID__玩家ID__…」命名（随机 5 位数字），便于列表解析
           const tName = encodeReplayKey({ fid: String(payload.fid || '0'), uploaderId: String(payload.uploaderId || '0'), uploaderName: '[测试]', teamId: 0, mapId: 0, ts: Date.now() }).split('/').pop();
-          fs.writeFileSync(path.join(d3, tName), Buffer.from(payload.data));
-          replayLog('testRecord: 已保存 ' + tName + ' (' + payload.data.byteLength + 'B)');
+          fs.writeFileSync(path.join(d3, tName), webmBuf);
+          replayLog('testRecord: 已保存 ' + tName + ' (' + webmBuf.length + 'B)');
           send('replay:changed', replayUploader.status());
-          send('replay:testResult', { ok: true, file: tName, size: payload.data.byteLength });
+          send('replay:testResult', { ok: true, file: tName, size: webmBuf.length });
           return { ok: true, savedLocal: true, message: '测试录制完成，已保存到本地（未上传）' };
         } catch (e2) { return { ok: false, message: '保存失败: ' + String((e2 && e2.message) || e2) }; }
       }
@@ -1038,8 +1061,8 @@ function registerIpc() {
           const d2 = localReplaysDir();
           fs.mkdirSync(d2, { recursive: true });
           const nofidName = 'nofid_' + Date.now() + '.webm';
-          fs.writeFileSync(path.join(d2, nofidName), Buffer.from(payload.data));
-          replayLog('save: 无对局ID，已存本地 ' + nofidName + ' (' + payload.data.byteLength + 'B)');
+          fs.writeFileSync(path.join(d2, nofidName), webmBuf);
+          replayLog('save: 无对局ID，已存本地 ' + nofidName + ' (' + webmBuf.length + 'B)');
           try { if (Notification.isSupported()) new Notification({ title: '对局录像', body: '未识别到对局ID，录像已保存到本地（未上传）' }).show(); } catch (e3) {}
           send('replay:changed', replayUploader.status());
           return { ok: true, savedLocal: true, message: '未识别到对局ID，录像已保存到本地（未上传）' };
@@ -1051,7 +1074,7 @@ function registerIpc() {
       fs.mkdirSync(dir, { recursive: true });
       const filename = encodeReplayKey({ fid, uploaderId: meta.uploaderId, uploaderName: meta.uploaderName, teamId: meta.teamId, mapId: meta.mapId, ts: Date.now() }).split('/').pop();
       const localPath = path.join(dir, filename);
-      const buf = Buffer.from(payload.data);
+      const buf = webmBuf;
       fs.writeFileSync(localPath, buf);
       // 不强制上传：先保存到本地，用户在对局录像列表点「⬆ 上传」自行选择分享
       send('replay:changed', replayUploader.status());

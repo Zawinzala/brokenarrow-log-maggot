@@ -463,7 +463,7 @@ function renderArchive(list) {
         return `<tr class="archive-row"${link} data-fid="${fid}" title="左键：详情；右键：在 BATrace 打开对局">
           <td class="${st.cls}">${st.text}</td>
           <td>${modeBadge(m)}</td>
-          <td>${esc(m.map || '未知地图')}${hasReplay ? ' <span class="replay-mark" title="该对局有录像（含云端）">📹</span>' : ''}</td>
+          <td>${esc(m.map || '未知地图')}${hasReplay ? ' <span class="replay-mark" title="该对局有录像，点击播放" role="button">📹</span>' : ''}</td>
           <td class="${m.localEloDelta == null ? 'dim' : m.localEloDelta > 0 ? 'win' : 'loss'}">${elo}</td>
           <td class="dim">${fmtTime(m.endTime)}</td>
           <td class="dim">${who ? '[' + esc(who) + ']' : ''}</td>
@@ -473,8 +473,102 @@ function renderArchive(list) {
   el.querySelectorAll('.archive-row[data-fid]').forEach((item) => {
     item.addEventListener('click', (e) => { e.preventDefault(); openMatchDetail(item.dataset.fid); });
   });
+  // 点 📹 直接打开该对局的录像（本地优先，无本地则云端）
+  el.querySelectorAll('.replay-mark').forEach((mk) => {
+    mk.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const row = mk.closest('.archive-row');
+      if (row && row.dataset.fid) openReplayForFid(row.dataset.fid);
+    });
+  });
 }
 
+// 从对局档案的 📹 打开录像：单个视角直接播；多个（本地多份/云端不同上传者）弹列表选择
+async function openReplayForFid(fid) {
+  try {
+    const items = await collectReplayItemsForFid(fid);
+    if (!items.length) { setStatus('该对局暂无录像可播放', false); return; }
+    let chosen = items[0];
+    if (items.length > 1) {
+      chosen = await pickReplay(items);
+      if (!chosen) return;
+    }
+    await playReplayItem(chosen);
+  } catch (e) { setStatus('打开录像失败：' + e.message, false); }
+}
+
+// 收集某对局所有录像视角：本地/云端按上传者合并（同上传者的本地副本+云端算一个视角，播放优先本地）
+async function collectReplayItemsForFid(fid) {
+  const q = String(fid);
+  const cloud = await BA.listReplays(q).catch(() => ({ list: [] }));
+  const lr = await BA.listLocalReplays().catch(() => null);
+  const locals = ((lr && lr.list) || []).filter((x) => String(x.fid) === q);
+  const clouds = ((cloud && cloud.list) || []).filter((x) => String(x.fid) === q);
+  const byUid = {};
+  for (const it of locals) { const k = String(it.uploaderId || ''); (byUid[k] = byUid[k] || { local: null, cloud: null }).local = it; }
+  for (const it of clouds) { const k = String(it.uploaderId || ''); (byUid[k] = byUid[k] || { local: null, cloud: null }).cloud = it; }
+  return Object.keys(byUid).map((uid) => {
+    const g = byUid[uid];
+    const base = g.local || g.cloud;
+    return {
+      fid: q,
+      local: g.local,
+      cloud: g.cloud,
+      source: g.local && g.cloud ? 'both' : g.local ? 'local' : 'cloud',
+      name: base.uploaderName || '',
+      map: base.map || '',
+      team: base.team != null && base.team !== '' ? base.team : base.teamId,
+      teamId: base.teamId,
+      createdAt: base.createdAt || base.endTime,
+      size: base.size,
+      durationSec: base.durationSec
+    };
+  });
+}
+
+// 播放某个视角：本地优先（可离线），否则云端并缓存到本地
+async function playReplayItem(item) {
+  if (item.local) {
+    const r = await BA.readLocalReplay(item.local.id);
+    if (r && r.ok) {
+      const url = URL.createObjectURL(new Blob([r.data], { type: 'video/webm' }));
+      openReplayPlayer({ id: item.local.id, videoUrl: url, fid: item.fid, name: item.name, map: item.map, isBlob: true });
+      return;
+    }
+  }
+  if (item.cloud) {
+    openReplayPlayer({ id: item.cloud.id, videoUrl: item.cloud.videoUrl, fid: item.fid, name: item.name, map: item.map });
+    if (item.cloud.videoUrl) BA.cacheRemoteReplay(item.cloud.id, item.cloud.videoUrl).catch(() => {});
+    return;
+  }
+  setStatus('该对局暂无录像可播放', false);
+}
+
+let replayPickResolve = null;
+let lastVersionInfo = null; // 最近一次版本信息（下载按钮用）
+function pickReplay(items) {
+  return new Promise((resolve) => {
+    replayPickResolve = resolve;
+    const wrap = $('replayPickerList');
+    if (!wrap) { resolve(null); return; }
+    wrap.innerHTML = (items || []).map((it, i) => `
+      <div class="inv-item replay-pick-item" data-idx="${i}" title="点击播放">
+        <span class="r-name">${esc(it.name || '未知')}</span>
+        ${it.source === 'both' ? '<span class="r-src cloud">☁ 云端</span><span class="r-src local">📁 本地</span>' : it.source === 'local' ? '<span class="r-src local">📁 本地</span>' : '<span class="r-src cloud">☁ 云端</span>'}
+        ${replayTeamTag(it.team != null && it.team !== '' ? it.team : it.teamId)}
+        <span class="dim">${it.durationSec ? fmtDuration(it.durationSec) : '-'}</span>
+        <span class="dim">${fmtSize(it.size)}</span>
+        <span class="dim">${fmtTime(it.createdAt)}</span>
+      </div>`).join('');
+    $('replayPickerModal').classList.remove('hidden');
+    wrap.querySelectorAll('.replay-pick-item').forEach((el) => el.addEventListener('click', () => {
+      $('replayPickerModal').classList.add('hidden');
+      const idx = Number(el.dataset.idx);
+      if (replayPickResolve) { replayPickResolve(items[idx] || null); replayPickResolve = null; }
+    }));
+  });
+}
 // ---------- 对局详情弹窗 ----------
 async function openMatchDetail(fid) {
   $('matchModal').classList.remove('hidden');
@@ -910,7 +1004,8 @@ document.addEventListener('contextmenu', (e) => {
   showCtx(e.clientX, e.clientY, items);
 });
 document.addEventListener('click', () => hideCtx());
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { hideCtx(); clearInvGameTimer(); stopRadarLoading(); if (window.BAGame && BAGame.isOpen()) BAGame.close(); const bm = $('banAlertModal'); if (bm) bm.classList.add('hidden'); const m = $('investigateModal'); if (m) m.classList.add('hidden'); const mm = $('matchModal'); if (mm) mm.classList.add('hidden'); const rp = $('replayModal'); if (rp) closeReplayPlayer(); } });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { hideCtx(); clearInvGameTimer(); stopRadarLoading(); if (window.BAGame && BAGame.isOpen()) BAGame.close(); const bm = $('banAlertModal'); if (bm) bm.classList.add('hidden'); const m = $('investigateModal'); if (m) m.classList.add('hidden'); const mm = $('matchModal'); if (mm) mm.classList.add('hidden'); const rp = $('replayModal'); if (rp) closeReplayPlayer(); const pk = $('replayPickerModal'); if (pk) { pk.classList.add('hidden'); if (replayPickResolve) { replayPickResolve(null); replayPickResolve = null; } } } });
+  const anm = $('announcementModal'); if (anm) anm.classList.add('hidden');
 
 ﻿﻿﻿// ---------- 调查加载雷达动画（纯视觉，不可交互） ----------
 let radarLoading = null;
@@ -1148,6 +1243,8 @@ function renderBanAlert(d) {
 // ---------- 对局录像（对象存储直传） ----------
 let replayFids = new Set(); // 有录像的对局 ID（云端列表 + 待上传队列）
 let replayWarnGb = 6;       // 云端录像存储提醒阈值（免费上限 10GB）
+let replayRecordingActive = false; // 当前是否在录制：预览框只允许在录制时显示
+const replayUploading = new Map(); // 本地录像名 -> { current, total }：上传中状态（重渲染后仍保持禁用+进度）
 function renderReplayStatus(s) {
   const el = $('replayStatus');
   if (!el) return;
@@ -1180,11 +1277,11 @@ function updateReplayFids(list, status) {
   if (archiveList && archiveList.length) renderArchive(archiveList); // 刷新对局档案的 📹 标记
 }
 
-async function refreshReplayList(fid) {
+async function refreshReplayList(fid, opts) {
   const el = $('replayList');
   if (!el) return;
   const q = (fid != null && fid !== '') ? String(fid) : '';
-  el.innerHTML = '<span class="dim">载入录像列表…</span>';
+  if (!(opts && opts.silent)) el.innerHTML = '<span class="dim">载入录像列表…</span>'; // silent 时不清空，避免上传中列表闪烁
   try {
     const cloud = await BA.listReplays(q).catch(() => ({ list: [], error: null }));
     const lr = await BA.listLocalReplays().catch(() => null);
@@ -1294,6 +1391,9 @@ function replayRowHtml(r) {
     : r.source === 'local' ? (negative ? '<span class="r-src test">🧪 测试</span>' : '<span class="r-src local">📁 本地</span>')
     : '<span class="r-src cloud">☁ 云端</span>';
   const canUpload = r.source === 'local' && !negative;
+  const up = (r.localId && replayUploading.has(r.localId)) ? replayUploading.get(r.localId) : null;
+  const upPct = up ? (Number(up.total) ? Math.min(100, Math.round(Number(up.current) / Number(up.total) * 100)) : 0) : 0;
+  const upHtml = canUpload ? `<button class="btn btn-accent r-up"${up ? ' disabled' : ''} title="上传到服务器（可选）">⬆ 上传</button><span class="r-progress${up ? '' : ' hidden'}"><span class="r-progress-track"><span class="r-progress-bar" style="width:${upPct}%"></span></span><em class="r-progress-pct">${upPct}%</em></span>` : '';
   return `
     <div class="replay-row" data-fid="${esc(r.fid)}" data-name="${esc(r.name)}" data-map="${esc(r.map)}" data-source="${r.source}" data-local="${esc(r.localId)}" data-cloud="${esc(r.cloudId)}" data-video="${esc(r.video)}" title="右键：打开位置 / 对局详情 / BATrace / 删除">
       <span class="r-name">${esc(r.name || '未知')}</span>
@@ -1302,7 +1402,7 @@ function replayRowHtml(r) {
       <span class="dim">${r.durationSec ? fmtDuration(r.durationSec) : '-'}</span>
       <span class="dim">${fmtSize(r.size)}</span>
       <span class="dim">${fmtTime(r.createdAt)}</span>
-      ${canUpload ? '<button class="btn btn-accent r-up" title="上传到服务器（可选）">⬆ 上传</button>' : ''}
+      ${upHtml}
       <button class="btn btn-ghost r-play">▶ 播放</button>
       <button class="r-del" title="删除这条录像">🗑</button>
     </div>`;
@@ -1332,18 +1432,46 @@ function bindReplayRows(el) {
     const upBtn = row.querySelector('.r-up');
     if (upBtn) upBtn.addEventListener('click', async (e) => {
       e.stopPropagation();
+      if (upBtn.disabled) return;
+      upBtn.disabled = true;
+      setRowUploadProgress(localId, { current: 0, total: 0 }); // 立即显示进度条
       try {
         const r = await BA.localUpload(localId);
-        setStatus((r && r.message) || '已加入上传队列', !!(r && r.ok));
+        if (!r || !r.ok) { setRowUploadProgress(localId, { done: true }); setStatus((r && r.message) || '上传失败', false); }
+        else setStatus((r && r.message) || '已加入上传队列', true);
         BA.getReplayStatus().then(renderReplayStatus).catch(() => {});
         refreshLocalReplayList();
-      } catch (err) { setStatus('上传失败：' + err.message, false); }
+      } catch (err) { setRowUploadProgress(localId, { done: true }); setStatus('上传失败：' + err.message, false); }
     });
     row.querySelector('.r-del').addEventListener('click', async (e) => {
       e.stopPropagation();
       await deleteReplayRow(row);
     });
   });
+}
+// 行内上传进度：根据 onReplayUploadProgress 事件就地更新进度条/按钮（不重载列表）
+function setRowUploadProgress(key, state) {
+  const row = document.querySelector('.replay-row[data-local="' + CSS.escape(String(key)) + '"]');
+  const wrap = row ? row.querySelector('.r-progress') : null;
+  const btn = row ? row.querySelector('.r-up') : null;
+  if (state && state.done) {
+    replayUploading.delete(String(key));
+    if (row) { if (wrap) wrap.classList.add('hidden'); if (btn) { btn.disabled = false; btn.textContent = '⬆ 上传'; } }
+    if (!state.ok) setStatus((state.error ? '上传失败：' + state.error : '上传失败，请稍后重试'), false);
+    return;
+  }
+  replayUploading.set(String(key), { current: Number((state && state.current) || 0), total: Number((state && state.total) || 0) });
+  if (!row) return;
+  if (btn) btn.disabled = true;
+  if (!wrap) return;
+  wrap.classList.remove('hidden');
+  const bar = wrap.querySelector('.r-progress-bar');
+  const pct = wrap.querySelector('.r-progress-pct');
+  const total = Number((state && state.total) || 0);
+  const current = Number((state && state.current) || 0);
+  const p = total ? Math.min(100, Math.round(current / total * 100)) : 0;
+  if (bar) bar.style.width = p + '%';
+  if (pct) pct.textContent = p + '%';
 }
 async function deleteReplayRow(row) {
   // 合并行（云端+本地）默认只删本地副本，云端共享录像不会被动到
@@ -1392,7 +1520,7 @@ function openReplayPlayer(item) {
   if (item.isBlob) replayBlobUrl = item.videoUrl;
   $('replayModal').classList.remove('hidden');
   const btns = document.querySelectorAll('.replay-speed-btn');
-  // 倍速档位 = 相对「实时(5 秒/帧)」的倍率：1x→playbackRate 5（默认）、2x→10、3x→15
+  // 倍速档位：1x→5 倍速（默认快速浏览）、2x→10、3x→15
   const setRate = (r) => { v.playbackRate = r * 5; btns.forEach((b) => b.classList.toggle('active', Number(b.dataset.rate) === r)); };
   btns.forEach((b) => { b.onclick = () => setRate(Number(b.dataset.rate)); });
   setRate(1);
@@ -1639,6 +1767,7 @@ function renderMaggot(r, name) {
 // ---------- 版本提醒 ----------
 function renderVersion(v) {
   if (!v) return;
+  lastVersionInfo = v;
   const av = $('aboutVer');
   if (av) av.textContent = `当前版本 v${v.current}`;
   const verEl = $('ver');
@@ -1701,8 +1830,9 @@ function bindUI() {
     if (!lastReport) { setStatus('请先搜索并点选一位玩家（粗查）再查蛆指数', false); return; }
     runMaggot(lastReport.id, lastReport.name);
   });
-  on('btnUpdateOpen', 'click', () => openLink(GITHUB_URL));
   on('btnUpdateClose', 'click', () => $('updateBanner').classList.add('hidden'));
+  on('btnUpdateDownload', 'click', () => { if (lastVersionInfo && lastVersionInfo.url) openLink(lastVersionInfo.url); });
+  on('btnAnnouncementClose', 'click', () => $('announcementModal').classList.add('hidden'));
   const link = (id, url) => { const el = $(id); if (el) el.addEventListener('click', (e) => { e.preventDefault(); openLink(url); }); };
   link('linkBatrace', BATRACE_URL);
   link('linkMaggotSite', MAGGOT_SITE_URL);
@@ -1807,6 +1937,7 @@ function bindUI() {
   on('btnReplayConfirmLater', 'click', () => replayConfirm('later'));
   on('btnReplayConfirmClose', 'click', () => { replayConfirmKey = null; const mm = $('replayConfirmModal'); if (mm) mm.classList.add('hidden'); });
   on('btnReplayClose', 'click', closeReplayPlayer);
+  on('btnReplayPickerClose', 'click', () => { $('replayPickerModal').classList.add('hidden'); if (replayPickResolve) { replayPickResolve(null); replayPickResolve = null; } });
   on('btnLocalClean30', 'click', async () => {
     const ok = await askConfirm('删除 30 天前的本地录像？（云端不受影响）');
     if (!ok) return;
@@ -1942,6 +2073,7 @@ async function init() {
   });
   BA.onRoomToolUsers((ids) => { toolUserIds = new Set((ids || []).map(String)); const cur = session && session.current; if (cur) renderMatchGrid(); else renderMatchGrid(); });
   BA.onReplayRecording((d) => {
+    replayRecordingActive = !!(d && d.active && !d.error);
     if (d && d.error) { const el = $('replayStatus'); if (el) { el.textContent = '⚠ 录制异常：' + d.error; el.title = '录制失败详情见 %APPDATA%/broken-arrow-log-assistant/replay.log'; } setReplayPreview(false); return; }
     renderReplayStatus(d);
     if (d && d.active) {
@@ -1953,13 +2085,14 @@ async function init() {
     }
   });
   BA.onReplayProgress(() => { BA.getReplayStatus().then(renderReplayStatus).catch(() => {}); });
-  BA.onReplayChanged(() => { BA.getReplayStatus().then(renderReplayStatus).catch(() => {}); refreshReplayList($('replaySearch').value.trim()); });
-  // 预览只在真正出帧（开始录制）时显示，避免空框提前出现
+  BA.onReplayChanged(() => { BA.getReplayStatus().then(renderReplayStatus).catch(() => {}); refreshReplayList($('replaySearch').value.trim(), { silent: true }); });
+  // 预览帧持续更新图片；只有确实在录制时才显示（防止停止后残留帧把它重新点亮）
+  BA.onReplayUploadProgress((d) => { if (d && d.key) { setRowUploadProgress(d.key, d); if (d.done) BA.getReplayStatus().then(renderReplayStatus).catch(() => {}); } });
   BA.onReplayPreview((d) => {
     const img = $('replayPreviewImg');
     if (!img || !d || !d.dataUrl) return;
     img.src = d.dataUrl;
-    setReplayPreview(true);
+    setReplayPreview(replayRecordingActive);
   });
   // 点击玩家卡片 → 打开完整报告；📋 按钮 → 复制（上一局视图用 prevRows）
   $('teamGrid').addEventListener('click', (e) => {
@@ -1977,6 +2110,7 @@ async function init() {
   });
   BA.getVersion().then(renderVersion).catch(() => {});
   BA.onVersion(renderVersion);
+  BA.onAnnouncement((d) => { if (d && d.text) { const el = $('announcementText'); if (el) el.textContent = d.text; $('announcementModal').classList.remove('hidden'); } });
 }
 
 // 兜底：任何异步错误都显示出来，而不是“点了没反应”

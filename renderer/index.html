@@ -30,7 +30,7 @@
   <main>
     <div id="updateBanner" class="update-banner hidden">
       <span id="updateText"></span>
-      <button id="btnUpdateOpen" class="btn btn-ghost light">查看</button>
+      <button id="btnUpdateDownload" class="btn btn-ghost light">⬇ 下载新版本</button>
       <button id="btnUpdateClose" class="btn btn-ghost light">✕</button>
     </div>
 
@@ -194,6 +194,16 @@
     </div>
   </main>
 
+  <!-- 公告弹窗（每次启动有公告就弹一次） -->
+  <div id="announcementModal" class="modal hidden">
+    <div class="modal-box small">
+      <div class="modal-head">
+        <span class="inv-name">📢 公告</span>
+        <button id="btnAnnouncementClose" class="btn btn-ghost" style="margin-left:auto">✕</button>
+      </div>
+      <div id="announcementText" style="white-space:pre-wrap;line-height:1.7;font-size:13px"></div>
+    </div>
+  </div>
   <!-- 确认弹窗 -->
   <div id="confirmModal" class="modal hidden">
     <div class="modal-box small">
@@ -344,6 +354,17 @@
     </div>
   </div>
 
+  <!-- 对局录像选择列表（档案 📹 有多个视角时弹出） -->
+  <div id="replayPickerModal" class="modal hidden">
+    <div class="modal-box">
+      <div class="modal-head">
+        <span class="inv-name">选择录像视角</span>
+        <span class="dim" style="font-size:12px">本地 / 云端不同上传者的视角</span>
+        <button id="btnReplayPickerClose" class="btn btn-ghost" style="margin-left:auto">✕</button>
+      </div>
+      <div id="replayPickerList" class="inv-list"></div>
+    </div>
+  </div>
   <!-- 对局录像播放弹窗 -->
   <div id="replayModal" class="modal hidden">
     <div class="modal-box wide replay-video-box">

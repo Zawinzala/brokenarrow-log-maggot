@@ -61,7 +61,7 @@ function registerStubIpc() {
   handle('tracker:listAccounts', () => ({ list: [{ id: '8863', name: 'Zola', persona: 'Zola', matchCount: 3 }] }));
   handle('tracker:deleteAccount', (e, id) => ({ ok: true, message: 'smoke deleted ' + id }));
   handle('replay:status', () => ({ recording: { active: false, current: null }, uploader: { pending: 0, uploading: 0, lastError: null, queue: [] } }));
-  handle('replay:list', () => ({ list: [{ id: 'replays/8049993__8863__Zola__1__22__1700000000000__5a6f6c61.webm', fid: '8049993', map: 'Ignalina Powerplant', mapId: 22, uploaderId: '8863', uploaderName: 'Zola', teamId: 1, team: 'Bravo', size: 1024, createdAt: Date.now(), durationSec: 0, videoUrl: 'https://example/x.webm' }], error: null }));
+  handle('replay:list', () => ({ list: [{ id: 'replays/8049993__8863__Zola__1__22__1700000000000__5a6f6c61.webm', fid: '8049993', map: 'Ignalina Powerplant', mapId: 22, uploaderId: '8863', uploaderName: 'Zola', teamId: 1, team: 'Bravo', size: 1024, createdAt: Date.now(), durationSec: 0, videoUrl: 'https://example/x.webm' }, { id: 'replays/8049993__55555__Other__0__22__1700000000000__4f74686572.webm', fid: '8049993', map: 'Ignalina Powerplant', mapId: 22, uploaderId: '55555', uploaderName: 'Other', teamId: 0, team: 'Alpha', size: 512, createdAt: Date.now() - 5000, durationSec: 0, videoUrl: 'https://example/other.webm' }], error: null }));
   handle('replay:localList', () => ({ list: [{ id: '8028345__8863__Zola__100__11__1700000000000__5a6f6c61.webm', fid: '8028345', map: 'Airport', mapId: 11, uploaderId: '8863', uploaderName: 'Zola', teamId: 100, size: 2048, createdAt: Date.now() - 200000, localPath: '(桩)' }, { id: '8049993__8863__Zola__1__22__1700000000000__5a6f6c61.webm', fid: '8049993', map: 'Ignalina Powerplant', mapId: 22, uploaderId: '8863', uploaderName: 'Zola', teamId: 1, size: 1024, createdAt: Date.now() - 1000, localPath: '(桩)' }] }));
   handle('replay:localDelete', () => ({ ok: true, message: '已删除本地录像' }));
   handle('replay:localClean', () => ({ ok: true, removed: 2 }));
@@ -187,6 +187,19 @@ app.whenReady().then(async () => {
         out.replayPreviewHidden = (document.getElementById('replayPreviewWrap') || {}).classList.contains('hidden');
         out.replayPreviewImg = !!document.getElementById('replayPreviewImg');
         out.hasReplayPreviewApi = typeof window.api.onReplayPreview === 'function';
+        out.hasUploadProgressApi = typeof window.api.onReplayUploadProgress === 'function';
+        out.hasAnnouncementApi = typeof window.api.onAnnouncement === 'function';
+        out.announcementModalExists = !!document.getElementById('announcementModal');
+        out.btnUpdateDownloadExists = !!document.getElementById('btnUpdateDownload');
+        out.hasRowProgress = !!document.querySelector('.r-progress');
+        // 点对局档案的 📹 → 多个视角先弹选择列表，选一个再播放
+        const amark = document.querySelector('.archive-row .replay-mark');
+        if (amark) { amark.click(); await new Promise((r) => setTimeout(r, 400)); }
+        out.replayPickerShown = !(document.getElementById('replayPickerModal') || {}).classList.contains('hidden');
+        out.replayPickerCount = document.querySelectorAll('#replayPickerList .replay-pick-item').length;
+        const firstPick = document.querySelector('#replayPickerList .replay-pick-item');
+        if (firstPick) { firstPick.click(); await new Promise((r) => setTimeout(r, 400)); }
+        out.replayOpenedFromArchive = !(document.getElementById('replayModal') || {}).classList.contains('hidden');
         out.replayFirstGroup = (document.querySelector('.replay-group-title') || {}).textContent || '';
         // 右键录像行 → 菜单含 打开位置/对局详情/BATrace/删除
         const lrow = document.querySelector('.replay-row[data-source="local"]');

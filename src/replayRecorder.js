@@ -111,15 +111,16 @@ class ReplayRecorder {
   }
 
   // 正常结束：通知页面停止并交回数据（不关窗，等 save 后再关）
-  stop() {
+  // fid/map 可覆盖：matchStart 时常拿不到对局ID，matchEnd 时已确定，必须把真实 fid 传下来（否则存成 nofid_*.webm）
+  stop(fid, map) {
     const win = this.win;
     const cur = this.current;
     if (!win) { this.active = false; this.current = null; this._emitStatus(); return; }
     try {
       win.webContents.send('replay:recorder:stop', {
         discard: false,
-        fid: cur && cur.fid,
-        map: cur && cur.map,
+        fid: (fid != null && String(fid) !== '') ? String(fid) : (cur && cur.fid) || '',
+        map: (map != null && String(map) !== '') ? String(map) : (cur && cur.map) || '',
         endTime: Date.now(),
         durationSec: cur ? Math.round((Date.now() - cur.startedAt) / 1000) : 0
       });

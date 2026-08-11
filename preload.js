@@ -32,6 +32,7 @@ contextBridge.exposeInMainWorld('api', {
   // 版本
   getVersion: () => ipcRenderer.invoke('app:version'),
   onVersion: (cb) => ipcRenderer.on('version', (e, d) => cb(d)),
+  onAnnouncement: (cb) => ipcRenderer.on('announcement', (e, d) => cb(d)),
 
   // API 用量 + 心跳
   getUsage: () => ipcRenderer.invoke('usage:get'),
@@ -83,6 +84,7 @@ contextBridge.exposeInMainWorld('api', {
   onRoomToolUsers: (cb) => ipcRenderer.on('room:toolusers', (e, d) => cb(d)),
   onReplayRecording: (cb) => ipcRenderer.on('replay:recording', (e, d) => cb(d)),
   onReplayPreview: (cb) => ipcRenderer.on('replay:preview', (e, d) => cb(d)),
+  onReplayUploadProgress: (cb) => ipcRenderer.on('replay:uploadProgress', (e, d) => cb(d)),
   onReplayProgress: (cb) => ipcRenderer.on('replay:progress', (e, d) => cb(d)),
   onReplayChanged: (cb) => ipcRenderer.on('replay:changed', (e, d) => cb(d)),
 

@@ -13,6 +13,8 @@
   let finalMap = cfg ? (cfg.map || '') : '';
   const video = document.getElementById('v');
   let started = false;
+  const SAMPLE_MS = 2000;   // 采样间隔：每 2 秒抓一帧
+  const SAMPLE_SEC = SAMPLE_MS / 1000;
 
   function fail(msg) {
     try { rec.save({ ok: false, error: String(msg) }); } catch (e) {}
@@ -62,7 +64,8 @@
       try { ctx.drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height); frameCount++; } catch (e) {}
       const mime = (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported('video/webm;codecs=vp8')) ? 'video/webm;codecs=vp8' : 'video/webm';
       const cstream = canvas.captureStream(1);
-      mr = new MediaRecorder(cstream, { mimeType: mime, videoBitsPerSecond: 1200000 });
+      // 码率提高：1fps 下 5Mbps 让每个真实帧有充足预算，画质不再糊
+      mr = new MediaRecorder(cstream, { mimeType: mime, videoBitsPerSecond: 5000000 });
       const chunks = [];
       mr.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
       mr.onstop = async () => {
@@ -71,19 +74,19 @@
         const blob = new Blob(chunks, { type: mime });
         const buf = await blob.arrayBuffer();
         try {
-          await rec.save({ ok: true, fid: finalFid, map: finalMap, mime, data: buf, frames: frameCount, durationSec: Math.round(frameCount * 5), testMode: !!(cfg && cfg.testMode), uploaderId: (cfg && cfg.testUploaderId) || '' });
+          await rec.save({ ok: true, fid: finalFid, map: finalMap, mime, data: buf, frames: frameCount, durationSec: Math.round(frameCount * SAMPLE_SEC), testMode: !!(cfg && cfg.testMode), uploaderId: (cfg && cfg.testUploaderId) || '' });
         } catch (e) { fail('save fail ' + String(e)); }
       };
       mr.start(1000);
       started = true;
-      // 每 5 秒抽一帧（游戏画面），1fps 视频里该帧持续 5 帧
+      // 每 2 秒抽一帧（游戏画面），1fps 视频每秒一帧；间隔越小越流畅、文件越大
       drawTimer = setInterval(() => {
         try {
           ctx.drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
           frameCount++;
-          rec.progress({ fid: cfg.fid, seconds: frameCount * 5, frames: frameCount });
+          rec.progress({ fid: cfg.fid, seconds: frameCount * SAMPLE_SEC, frames: frameCount });
         } catch (e) {}
-      }, 5000);
+      }, SAMPLE_MS);
 
       // 录制预览：每秒把当前画面缩略图发给主界面（对局录像模块内置小预览，确认录的是哪块屏）
       const pvMaxW = 320, pvMaxH = 180;

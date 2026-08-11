@@ -3,7 +3,7 @@
 // 失败进本地队列 replay-queue.json，下次启动 / 每小时重试（指数退避，最长 1 小时）。上传成功保留本地副本。
 const fs = require('fs');
 const { encodeReplayKey } = require('./s3Client');
-const REPLAY_MAX_BYTES = 20 * 1024 * 1024; // 单文件上限 20MB（与 Worker 一致）
+const REPLAY_MAX_BYTES = 50 * 1024 * 1024; // 单文件上限 50MB（与 Worker 一致，超长对局可能超限，超限只留本地不上传）
 
 // 从本地录像文件名解析时间戳（fid__uid__teamId__mapId__ts__nameHex.webm），复用同一 ts 让重复上传同键幂等覆盖
 function tsFromFilename(name) {
@@ -14,12 +14,14 @@ function tsFromFilename(name) {
 }
 
 class ReplayUploader {
-  constructor({ dir, queueFile, getConfig, onChanged, httpImpl }) {
+  constructor({ dir, queueFile, getConfig, onChanged, httpImpl, netRequestImpl, onProgress }) {
     this.dir = dir;
     this.queueFile = queueFile;
     this.getConfig = getConfig || (() => ({}));
     this.onChanged = onChanged || null;
     this.httpImpl = httpImpl || ((u, o) => fetch(u, o));
+    this.netRequestImpl = netRequestImpl || null; // Electron net.request：可获取上传进度
+    this.onProgress = onProgress || null;            // (filename, {current,total}|{done,ok})
     this.queue = [];
     this.uploading = new Set();
     this.lastError = null;
@@ -48,7 +50,7 @@ class ReplayUploader {
   enqueue(entry) {
     if (!entry || entry.fid == null || entry.uploaderId == null) return { ok: false, message: '缺少 fid/uploaderId' };
     if (!/^\d+$/.test(String(entry.fid))) return { ok: false, message: '非正数对局ID，禁止上传（测试/无效录像）' };
-    if (Number(entry.size || 0) > REPLAY_MAX_BYTES) return { ok: false, message: '文件超过 20MB，禁止上传' };
+    if (Number(entry.size || 0) > REPLAY_MAX_BYTES) return { ok: false, message: '文件超过 50MB，禁止上传' };
     const key = String(entry.fid) + '|' + String(entry.uploaderId);
     const item = {
       fid: String(entry.fid),
@@ -102,15 +104,17 @@ class ReplayUploader {
       this.lastError = '未配置统计服务地址（Worker）';
       return { ok: false, message: this.lastError };
     }
-    let done = 0;
+    let done = 0, processed = false;
     for (const item of this.queue.slice()) {
       if (this.uploading.has(item._key)) continue;
       if (item.nextTry && item.nextTry > Date.now()) continue;
       if (!item.localPath || !fs.existsSync(item.localPath)) {
         this.queue = this.queue.filter((q) => q._key !== item._key);
         this.save();
+        processed = true;
         continue;
       }
+      processed = true;
       this.uploading.add(item._key);
       try {
         const ok = await this.uploadOne(base, item);
@@ -127,7 +131,7 @@ class ReplayUploader {
         this.uploading.delete(item._key);
       }
     }
-    if (done) this.emit();
+    if (processed) this.emit(); // 成功或失败都刷新状态，避免「上传中」残留
     return { ok: done > 0, done, pending: this.queue.length };
   }
 
@@ -149,6 +153,7 @@ class ReplayUploader {
     });
     const data = fs.readFileSync(item.localPath);
     const url = base + '/replay/upload?me=' + encodeURIComponent(item.uploaderId) + '&key=' + encodeURIComponent(objectKey);
+    if (this.netRequestImpl) return await this._uploadViaNetRequest(url, data, item);
     const resp = await this.httpImpl(url, {
       method: 'POST',
       headers: { 'Content-Type': 'video/webm', 'Content-Length': String(data.length) },
@@ -159,10 +164,58 @@ class ReplayUploader {
     try { j = await resp.json(); } catch (e) {}
     if (!resp.ok || !j || !j.ok) {
       this.lastError = '上传失败: HTTP ' + resp.status + ((j && j.error) ? ' ' + j.error : '');
+      if (this.onProgress) { try { this.onProgress(item.filename, { done: true, ok: false, error: this.lastError }); } catch (e) {} }
       return false;
     }
+    if (this.onProgress) { try { this.onProgress(item.filename, { done: true, ok: true }); } catch (e) {} }
     // 成功：保留本地副本（断网也能看），不删除
     return true;
+  }
+
+  // Electron net.request 上传：轮询 getUploadProgress() 上报进度，结束上报 done
+  _uploadViaNetRequest(url, data, item) {
+    return new Promise((resolve) => {
+      try {
+        const req = this.netRequestImpl({ method: 'POST', url });
+        req.setHeader('Content-Type', 'video/webm');
+        // 不要手动设 Content-Length：Electron net.request 会报 net::ERR_INVALID_ARGUMENT，让它按写入 body 自动计算
+        const timer = setInterval(() => {
+          try {
+            const p = req.getUploadProgress();
+            if (p && p.active && this.onProgress) this.onProgress(item.filename, { current: Number(p.current) || 0, total: Number(p.total) || data.length });
+          } catch (e) {}
+        }, 200);
+        const finish = (ok) => {
+          clearInterval(timer);
+          if (this.onProgress) { try { this.onProgress(item.filename, { done: true, ok, error: ok ? undefined : this.lastError }); } catch (e) {} }
+          resolve(ok);
+        };
+        req.on('response', (resp) => {
+          let body = '';
+          resp.on('data', (c) => { try { body += String(c); } catch (e) {} });
+          resp.on('end', () => {
+            let j = null;
+            try { j = JSON.parse(body); } catch (e) {}
+            if (resp.statusCode >= 200 && resp.statusCode < 300 && j && j.ok) {
+              this.lastError = null;
+              finish(true);
+            } else {
+              this.lastError = '上传失败: HTTP ' + resp.statusCode + ((j && j.error) ? ' ' + j.error : '');
+              finish(false);
+            }
+          });
+        });
+        req.on('error', (err) => {
+          this.lastError = '上传失败: ' + String((err && err.message) || err);
+          finish(false);
+        });
+        req.write(data);
+        req.end();
+      } catch (e) {
+        this.lastError = '上传失败: ' + String((e && e.message) || e);
+        resolve(false);
+      }
+    });
   }
 }
 

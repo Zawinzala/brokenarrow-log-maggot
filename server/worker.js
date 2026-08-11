@@ -9,7 +9,10 @@
 //   POST /replay/upload?me=<uid>&key=<replays/...webm> body=WebM → 上传自己的录像（任何人，me 须活跃工具用户；总量超 5GB 自动删最旧）
 //   GET  /replay/list                                 → 公开列出录像（元数据；播放走 R2 自定义域）
 //   DELETE /replay/delete?key=..&me=<uid>             → 删除（仅限删除 key 中 uid 与自己相同者）
-// 注意：录像不在这里存文件，直接写 R2 binding（名 REPLAY，绑定桶 brokenarrow-replay）；App 不持有任何 R2 密钥。
+//   GET  /update-meta                                 → 公开：{ version, notes, announcement, exeUrl, publishedAt }（App 启动检查更新/公告）
+//   POST /admin/update?token=..   body: {version,notes,announcement} → 发布版本元数据（管理端）
+//   POST /admin/upload-exe?token= body: exe 字节 → 存 R2 dist/ 固定名（管理端；单文件 ≤100MB，免费计划请求体上限）
+// 注意：录像不在这里存文件，直接写 R2 binding（名 REPLAY，绑定桶 brokenarrow-replay）；App 不持有任何 R2 密钥。管理 token 用 ADMIN_TOKEN，未设置则回退 HEARTBEAT_DEV_TOKEN。
 // 部署：Cloudflare 控制台 Workers 编辑页整段粘贴（KV 绑定名 ONLINE_KV）；并在「设置 → 变量和机密」加 HEARTBEAT_DEV_TOKEN（开发者查询密钥）。
 
 // 开发者查询接口密钥：从环境变量 HEARTBEAT_DEV_TOKEN 读取（不写死在代码里，防止开源仓库泄露）。
@@ -17,9 +20,9 @@
 
 function cleanId(s) { return String(s || '').replace(/[^0-9a-zA-Z-]/g, '').slice(0, 64); }
 
-// 录像：滚动上限 5GB、单文件上限 30MB、对象名白名单
+// 录像：滚动上限 5GB、单文件上限 50MB、对象名白名单
 const REPLAY_ROLL_GB = 5;
-const REPLAY_MAX_BYTES = 20 * 1024 * 1024; // 单文件上限 20MB
+const REPLAY_MAX_BYTES = 50 * 1024 * 1024; // 单文件上限 50MB
 const REPLAY_KEY_RE = /^replays\/[A-Za-z0-9_.-]+\.webm$/;
 
 // 按前缀列出 KV 并读取每个值（自动翻页，最多 20 页 x 1000 条）
@@ -141,6 +144,46 @@ export default {
       return json({ ok: true });
     }
 
+    // ---- 软件更新 / 公告（Cloudflare：版本元数据 + exe 托管） ----
+    // 管理端 token：ADMIN_TOKEN，未设置则回退 HEARTBEAT_DEV_TOKEN（你现有的 token 直接可用）
+    if (path === '/update-meta' && request.method === 'GET') {
+      const raw = await env.ONLINE_KV.get('meta:update').catch(() => null);
+      if (!raw) return json({ ok: false, error: 'no meta' }, 404);
+      let m = null;
+      try { m = JSON.parse(raw); } catch (e) {}
+      if (!m) return json({ ok: false, error: 'bad meta' }, 500);
+      return json({ ok: true, version: m.version, notes: m.notes, announcement: m.announcement, exeUrl: m.exeUrl, publishedAt: m.publishedAt });
+    }
+    if ((path === '/admin/update' || path === '/admin/upload-exe') && request.method === 'POST') {
+      const adminToken = env.ADMIN_TOKEN || env.HEARTBEAT_DEV_TOKEN || '';
+      if (!adminToken || url.searchParams.get('token') !== adminToken) return json({ error: 'forbidden' }, 403);
+      if (path === '/admin/update') {
+        let b = null;
+        try { b = await request.json(); } catch (e) {}
+        if (!b) return json({ error: 'bad body' }, 400);
+        // 支持只更新公告：版本号可留空，保留已发布的版本/更新内容
+        const raw = await env.ONLINE_KV.get('meta:update').catch(() => null);
+        let old = null;
+        try { old = raw ? JSON.parse(raw) : null; } catch (e) {}
+        const version = String(b.version || '').trim();
+        if (!version && !old) return json({ error: 'missing version（首次发布必须填版本号）' }, 400);
+        const meta = {
+          version: version || (old && old.version) || '',
+          notes: String(b.notes != null ? b.notes : (old && old.notes) || '').trim(),
+          announcement: String(b.announcement != null ? b.announcement : (old && old.announcement) || '').trim(),
+          exeUrl: 'https://brokenarrowreplay.zolahere.top/dist/broken-arrow-log-assistant-setup.exe',
+          publishedAt: Date.now()
+        };
+        await env.ONLINE_KV.put('meta:update', JSON.stringify(meta));
+        return json({ ok: true, meta });
+      }
+      // upload-exe：存 R2 dist/ 固定名（公开读，下载地址固定）
+      const body = await request.arrayBuffer();
+      if (!body || !body.byteLength) return json({ error: 'empty' }, 400);
+      if (body.byteLength > 100 * 1024 * 1024) return json({ error: 'too large (>100MB)' }, 413);
+      await env.REPLAY.put('dist/broken-arrow-log-assistant-setup.exe', body, { httpMetadata: { contentType: 'application/octet-stream' } });
+      return json({ ok: true, url: 'https://brokenarrowreplay.zolahere.top/dist/broken-arrow-log-assistant-setup.exe', size: body.byteLength });
+    }
     // ---- 心跳上报 ----
     if (path === '/heartbeat' && (request.method === 'POST' || request.method === 'GET')) {
       let anon = '', v = '', name = '', gameId = '';

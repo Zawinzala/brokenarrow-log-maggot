@@ -1,0 +1,1000 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-TNMKLQ79MK"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+      gtag('config', 'G-TNMKLQ79MK');
+    </script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>断箭蛆指数 V5 - By Zola</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background-color: #0f172a; color: #f1f5f9; font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; overflow-x: hidden; }
+        .glass-panel { background: rgba(30, 41, 59, 0.8); backdrop-filter: blur(16px); border: 1px solid rgba(255, 255, 255, 0.1); }
+        .bar-container { background: rgba(0,0,0,0.5); height: 6px; border-radius: 4px; overflow: hidden; flex: 1; } 
+        @media (min-width: 768px) { .bar-container { height: 8px; } }
+        
+        .bar-kill { background: #22c55e; height: 100%; transition: width 0.6s ease-out; }
+        .bar-loss { background: #ef4444; height: 100%; transition: width 0.6s ease-out; }
+        .bar-obj { background: #3b82f6; height: 100%; transition: width 0.6s ease-out; }
+        
+        .load-progress-bg { width: 100%; height: 8px; background: rgba(255,255,255,0.05); border-radius: 4px; overflow: hidden; margin: 12px 0; }
+        .load-progress-fill { width: 0%; height: 100%; background: #06b6d4; transition: width 0.4s ease; box-shadow: 0 0 15px rgba(6,182,212,0.6); }
+
+        .maggot-meter-bg { background: linear-gradient(90deg, #22c55e 0%, #eab308 50%, #ef4444 100%); height: 18px; border-radius: 9px; position: relative; }
+        .maggot-indicator { position: absolute; top: -4px; width: 6px; height: 26px; background: white; border: 2px solid #000; transform: translateX(-50%); transition: left 0.8s cubic-bezier(0.34, 1.56, 0.64, 1); }
+        
+        .tag-sticker-container { position: absolute; top: 1rem; right: 1rem; display: flex; flex-direction: column; gap: 0.5rem; align-items: flex-end; z-index: 30; transform-origin: top right; transform: scale(0.75); pointer-events: none; }
+        @media (min-width: 768px) { .tag-sticker-container { top: 1.5rem; right: 1.5rem; gap: 0.75rem; transform: scale(1); } }
+        
+        .tag-sticker-container-left { position: absolute; top: 1rem; left: 1rem; display: flex; flex-direction: column; gap: 0.5rem; align-items: flex-start; z-index: 30; transform-origin: top left; transform: scale(0.75); pointer-events: none; }
+        @media (min-width: 768px) { .tag-sticker-container-left { top: 1.5rem; left: 1.5rem; gap: 0.75rem; transform: scale(1); } }
+
+        .tag-sticker { 
+            pointer-events: auto; padding: 0.5rem 1.25rem; border-radius: 0.75rem; font-weight: 900; font-style: italic; 
+            font-size: 0.9rem; text-transform: uppercase; transform: rotate(8deg); box-shadow: 0 6px 15px rgba(0,0,0,0.4); 
+            border-width: 2px; animation: tagPop 0.5s ease-out forwards; opacity: 0; white-space: nowrap; 
+        }
+        .tag-sticker-left { transform: rotate(-5deg); animation: tagPopLeft 0.5s ease-out forwards; }
+
+        @keyframes tagPop { from { opacity: 0; transform: scale(0.5) rotate(20deg); } to { opacity: 1; transform: scale(1) rotate(8deg); } }
+        @keyframes tagPopLeft { from { opacity: 0; transform: scale(0.5) rotate(-15deg); } to { opacity: 1; transform: scale(1) rotate(-5deg); } }
+        
+        .teammate-row { transition: all 0.2s; border-bottom: 1px solid rgba(255,255,255,0.05); min-height: 80px; cursor: pointer; } 
+        @media (min-width: 768px) { .teammate-row { min-height: 85px; } }
+        
+        .teammate-row:hover { background: rgba(255,255,255,0.1) !important; }
+        .teammate-row:active { background: rgba(255,255,255,0.15) !important; transform: scale(0.995); }
+        .is-me { background: rgba(6, 182, 212, 0.15) !important; border-left: 3px solid #06b6d4; }
+        @media (min-width: 768px) { .is-me { border-left-width: 5px; } }
+
+        .history-chip { font-size: 0.85rem; padding: 6px 14px; background: #1e293b; border: 1px solid #475569; border-radius: 99px; cursor: pointer; transition: 0.2s; display: flex; align-items: center; gap: 10px; }
+        .history-chip:hover { border-color: #06b6d4; color: #22d3ee; background: #0f172a; }
+        .history-del { font-size: 1.1rem; line-height: 1; opacity: 0.5; }
+        .result-fade { animation: fadeIn 0.5s ease-out; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        
+        .modal-backdrop { background: rgba(0, 0, 0, 0.8); backdrop-filter: blur(4px); }
+        .search-result-item:hover { background: rgba(249, 115, 22, 0.1); border-color: rgba(249, 115, 22, 0.5); }
+        
+        .medal-badge { display: inline-flex; align-items: center; gap: 2px; padding: 2px 4px; border-radius: 4px; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.05); transition: all 0.2s; cursor: help; flex-shrink: 0; }
+        @media (min-width: 768px) { .medal-badge { gap: 4px; padding: 2px 6px; border-radius: 6px; } }
+        .medal-badge:hover { background: rgba(255,255,255,0.15); transform: translateY(-1px); border-color: rgba(255,255,255,0.2); }
+        
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: rgba(0,0,0,0.2); }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
+
+        .stat-grid-item { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.05); border-radius: 8px; padding: 10px; display: flex; flex-direction: column; align-items: center; text-align: center; }
+        .stat-grid-label { font-size: 10px; color: #94a3b8; text-transform: uppercase; margin-bottom: 2px; }
+        .stat-grid-value { font-size: 14px; font-weight: bold; color: #e2e8f0; font-family: ui-monospace, monospace; }
+    </style>
+</head>
+<body class="min-h-screen pt-4 px-2 pb-24 md:pt-10 md:px-4">
+
+    <div class="w-full max-w-6xl mx-auto flex flex-col md:flex-row justify-between items-center mb-6 md:mb-8 px-2 gap-4">
+        <div class="flex gap-4 items-center">
+            <a href="https://github.com/Zawinzala/Broken-Arrow-Maggot" target="_blank" class="flex items-center gap-2 px-3 py-1 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg text-slate-300 hover:text-white transition group">
+                <span class="text-[10px] md:text-xs font-mono font-bold">GitHub</span>
+            </a>
+            <div class="text-[10px] md:text-xs text-slate-400 font-mono tracking-widest uppercase font-bold">V5</div>
+        </div>
+        <div class="flex gap-1 md:gap-2 bg-slate-800 p-1 rounded-xl border border-slate-700 flex-wrap justify-center">
+            <button onclick="setLang('en')" id="btn_lang_en" class="px-3 py-1 md:px-4 md:py-1.5 text-xs rounded-lg transition font-bold">English</button>
+            <button onclick="setLang('zh')" id="btn_lang_zh" class="px-3 py-1 md:px-4 md:py-1.5 text-xs rounded-lg transition font-bold">中文</button>
+            <button onclick="setLang('ru')" id="btn_lang_ru" class="px-3 py-1 md:px-4 md:py-1.5 text-xs rounded-lg transition font-bold">Русский</button>
+            <button onclick="setLang('ja')" id="btn_lang_ja" class="px-3 py-1 md:px-4 md:py-1.5 text-xs rounded-lg transition font-bold">日本語</button>
+        </div>
+    </div>
+
+    <div class="glass-panel w-full max-w-6xl mx-auto rounded-[1.5rem] md:rounded-[2.5rem] p-5 md:p-10 shadow-2xl border-white/5">
+        <div class="text-center mb-8 md:mb-12">
+            <h1 class="text-4xl md:text-6xl font-black text-white tracking-tighter mb-4 flex flex-col md:block items-center justify-center">
+                <span id="lbl_title">断箭蛆指数</span>
+                <span class="text-base md:text-xl text-cyan-500 italic mt-2 md:mt-0 md:ml-4 opacity-80 font-serif">By Zola</span>
+            </h1>
+            <div class="flex justify-center gap-6 mb-4">
+                <a href="https://app.batrace.top/" target="_blank" class="text-xs text-slate-400 border border-slate-700 px-3 py-1 rounded-full hover:bg-slate-700 hover:text-white transition-all font-medium">Data Source: Batrace App API</a>
+                <span id="reqCounter" class="text-xs text-slate-500 font-mono" title="本会话真实 API 请求次数"></span>
+            </div>
+            <p class="text-cyan-400 font-mono text-[10px] md:text-sm uppercase tracking-[0.2em] md:tracking-[0.4em] font-bold" id="lbl_subtitle">Player Behavior Analysis</p>
+        </div>
+
+        <div class="flex flex-col items-center mb-10 md:mb-16">
+            <div class="flex flex-col md:flex-row gap-3 md:gap-4 w-full max-w-2xl relative">
+                <input type="text" id="steamInput" class="flex-1 bg-slate-900 border-2 border-slate-700 text-white p-4 md:p-5 rounded-xl md:rounded-2xl text-center text-base md:text-lg focus:ring-4 focus:ring-cyan-500/20 focus:border-cyan-500 outline-none transition-all placeholder-slate-600 shadow-2xl font-medium" onkeydown="if(event.key === 'Enter') handleCheck()">
+                <button onclick="handleCheck()" id="btn_check" class="bg-cyan-600 hover:bg-cyan-500 text-white font-black px-12 py-4 md:py-5 rounded-xl md:rounded-2xl shadow-xl transform active:scale-95 transition-all text-base md:text-lg whitespace-nowrap">开始检测</button>
+            </div>
+            
+            <div class="flex flex-row flex-wrap justify-center gap-2 md:gap-6 mt-4">
+                <button onclick="openSearchModal()" class="text-slate-400 text-xs md:text-sm hover:text-orange-400 transition flex items-center gap-2 group p-2">
+                    <span id="lbl_find_id_btn" class="border-b border-dotted border-slate-600 group-hover:border-orange-400">不知道 ID？通过用户名查找</span>
+                </button>
+                <button onclick="openMatchSearchModal()" class="text-slate-400 text-xs md:text-sm hover:text-cyan-400 transition flex items-center gap-2 group p-2">
+                    <span id="lbl_find_match_btn" class="border-b border-dotted border-slate-600 group-hover:border-cyan-400">只知道对局 ID？通过对局查玩家</span>
+                </button>
+            </div>
+            
+            <div id="historyContainer" class="flex flex-wrap justify-center gap-2 md:gap-3 mt-6 md:mt-8"></div>
+        </div>
+
+        <div id="loading" class="hidden text-center py-12 max-w-lg mx-auto">
+            <div class="flex justify-between text-sm font-bold text-slate-300 mb-2">
+                <span id="loadStatus">Initializing...</span>
+                <span id="loadPercent">0%</span>
+            </div>
+            <div class="load-progress-bg"><div id="loadProgressFill" class="load-progress-fill"></div></div>
+            <p class="text-xs text-slate-500 mt-3 font-mono font-medium" id="loadDetail">Fetching App API...</p>
+        </div>
+
+        <div id="errorArea" class="hidden mb-10 max-w-2xl mx-auto bg-red-900/30 border border-red-500/50 text-red-100 p-6 rounded-3xl text-base text-center font-bold">
+            <span id="errorMsg">Unknown Error</span>
+        </div>
+
+        <div id="resultPanel" class="hidden result-fade">
+            <div class="bg-slate-800/60 rounded-[2rem] md:rounded-[3rem] p-6 md:p-12 border border-white/10 flex flex-col items-center mb-10 md:mb-16 relative overflow-hidden">
+                <div class="tag-sticker-container" id="rightStickerContainer"></div>
+                <div class="tag-sticker-container-left" id="unitStickerContainer"></div>
+
+                <div class="text-center mb-4 mt-2 md:mt-0 w-full px-2">
+                    <div id="userNameDisplay" class="text-2xl md:text-4xl font-black text-white mb-2 truncate">Commander Name</div>
+                    <div id="calcTimeDisplay" class="text-[10px] md:text-xs font-mono text-slate-400 uppercase tracking-widest bg-black/20 inline-block px-4 py-1.5 rounded-full border border-white/5">
+                        Lv.0 <span class="mx-1 md:mx-2 opacity-30">|</span> 2024-01-01
+                    </div>
+                </div>
+
+                <h2 class="text-slate-400 text-xs md:text-sm font-black uppercase tracking-[0.2em] mb-2 mt-4" id="lbl_maggot_index_title">综合评价</h2>
+                <div class="text-[6rem] md:text-[10rem] font-black text-white leading-none mb-4 md:mb-6" id="maggotScoreDisplay" style="text-shadow: 0 5px 25px rgba(0,0,0,0.4);">1.0</div>
+                <div id="maggotLabel" class="text-xl md:text-3xl font-black px-8 py-2 md:px-10 md:py-3 rounded-full bg-slate-900 border-2 border-white/10 shadow-2xl mb-8 md:mb-12">Unknown</div>
+                
+                <div class="w-full max-w-3xl mb-8 md:mb-12">
+                    <div class="flex justify-between text-[10px] md:text-xs text-slate-400 mb-4 uppercase font-black tracking-widest">
+                        <span id="lbl_god_range">神</span><span id="lbl_maggot_range">蛆</span>
+                    </div>
+                    <div class="maggot-meter-bg"><div id="meterIndicator" class="maggot-indicator" style="left: 0%;"></div></div>
+                </div>
+
+                <div class="w-full max-w-5xl grid grid-cols-2 md:grid-cols-5 gap-4 md:gap-6 pt-8 md:pt-10 border-t-2 border-white/5">
+                    <div class="text-center"><div class="text-[10px] md:text-xs text-slate-500 uppercase font-black mb-1" id="lbl_ref_kdr">平均 KD 排名</div><div class="text-xl md:text-2xl font-mono font-black text-cyan-400" id="ref_avgKDR">#0.0</div></div>
+                    <div class="text-center"><div class="text-[10px] md:text-xs text-slate-500 uppercase font-black mb-1" id="lbl_ref_kr">平均击杀排名</div><div class="text-xl md:text-2xl font-mono font-black text-green-400" id="ref_avgKR">#0.0</div></div>
+                    <div class="text-center"><div class="text-[10px] md:text-xs text-slate-500 uppercase font-black mb-1" id="lbl_ref_dr">爱兵如子排名</div><div class="text-xl md:text-2xl font-mono font-black text-red-400" id="ref_avgDR">#0.0</div></div>
+                    <div class="text-center"><div class="text-[10px] md:text-xs text-slate-500 uppercase font-black mb-1" id="lbl_ref_or">平均MVP排名</div><div class="text-xl md:text-2xl font-mono font-black text-blue-400" id="ref_avgOR">#0.0</div></div>
+                    <div class="text-center col-span-2 md:col-span-1"><div class="text-[10px] md:text-xs text-slate-500 uppercase font-black mb-1" id="lbl_ref_wr">最近 12 局胜率</div><div class="text-xl md:text-2xl font-mono font-black text-yellow-400" id="ref_WR">0%</div></div>
+                </div>
+            </div>
+
+            <div class="flex items-center gap-4 md:gap-6 mb-8 md:mb-12">
+                <div class="h-[2px] flex-1 bg-white/10"></div>
+                <h3 class="text-lg md:text-2xl font-black text-slate-200 uppercase tracking-widest text-center" id="lbl_history_title">最近 12 局有效对局</h3>
+                <div class="h-[2px] flex-1 bg-white/10"></div>
+            </div>
+            <div id="matchesContainer" class="space-y-8 md:space-y-16"></div>
+        </div>
+    </div>
+
+    <!-- Modals -->
+    <div id="idSearchModal" class="fixed inset-0 z-50 hidden flex items-center justify-center modal-backdrop p-4">
+        <div class="glass-panel w-full max-w-lg rounded-2xl p-6 relative shadow-2xl bg-slate-900/90 border border-slate-600">
+            <button onclick="closeSearchModal()" class="absolute top-4 right-4 text-slate-400 hover:text-white">✕</button>
+            <h2 id="modal_title" class="text-xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-orange-400 to-red-500 mb-4 text-center">玩家查询</h2>
+            <div class="flex gap-2 mb-2">
+                <input type="text" id="modalSearchInput" class="bg-slate-800 border border-slate-600 text-white text-sm rounded-lg w-full p-3" placeholder="输入游戏用户名..." onkeydown="if(event.key === 'Enter') doNameSearch()">
+                <button onclick="doNameSearch()" id="modal_btn_search" class="text-white bg-orange-600 hover:bg-orange-700 rounded-lg px-6 py-3">查询</button>
+            </div>
+            <div id="modalStatusMsg" class="text-xs text-slate-400 min-h-[1.5rem] mb-2 pl-1"></div>
+            <div id="modalResultList" class="hidden rounded-xl overflow-hidden max-h-[300px] overflow-y-auto flex flex-col gap-1 pr-1 custom-scrollbar"></div>
+        </div>
+    </div>
+
+    <div id="matchSearchModal" class="fixed inset-0 z-50 hidden flex items-center justify-center modal-backdrop p-4">
+        <div class="glass-panel w-full max-w-4xl rounded-2xl p-6 relative shadow-2xl bg-slate-900/95 flex flex-col max-h-[90vh]">
+            <button onclick="closeMatchSearchModal()" class="absolute top-4 right-4 text-slate-400 hover:text-white z-10">✕</button>
+            <h2 id="modal_match_title" class="text-xl md:text-2xl font-black text-cyan-400 mb-6 text-center">通过对局查找玩家</h2>
+            <div class="flex gap-2 mb-4">
+                <input type="text" id="matchIdInput" class="bg-slate-800 border border-slate-600 text-white rounded-xl w-full p-4 font-mono" placeholder="输入对局 ID..." onkeydown="if(event.key === 'Enter') doMatchSearch()">
+                <button onclick="doMatchSearch()" id="modal_match_btn_search" class="text-white bg-cyan-600 hover:bg-cyan-500 rounded-xl px-6 py-4 font-bold">获取战绩</button>
+            </div>
+            <div id="matchModalStatus" class="text-xs mb-4 pl-1 text-center min-h-[1rem]"></div>
+            <div id="matchModalResultArea" class="hidden flex-1 overflow-y-auto custom-scrollbar pr-2">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div id="matchModalTeam0" class="space-y-1"></div>
+                    <div id="matchModalTeam1" class="space-y-1"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 玩家详情模态框 -->
+    <div id="playerDetailModal" class="fixed inset-0 z-[60] hidden flex items-center justify-center modal-backdrop p-4">
+        <div class="glass-panel w-full max-w-2xl rounded-2xl p-6 relative shadow-2xl bg-slate-900/95 border border-slate-600 flex flex-col max-h-[90vh]">
+            <button onclick="closePlayerDetailModal()" class="absolute top-4 right-4 text-slate-400 hover:text-white z-10 p-2">✕</button>
+            <div class="text-center mb-6">
+                <h2 id="pd_name" class="text-2xl font-black text-white">Player Name</h2>
+                <div class="flex justify-center gap-4 mt-2 text-xs text-slate-400 font-mono">
+                    <span id="pd_id">ID: 123456</span>
+                    <span id="pd_elo" class="text-cyan-400">ELO 1200 (+15.0)</span>
+                </div>
+            </div>
+            
+            <div class="overflow-y-auto custom-scrollbar pr-2 flex-1">
+                <div class="grid grid-cols-4 gap-2 mb-4">
+                    <div class="stat-grid-item bg-green-900/20 border-green-500/30">
+                        <div class="stat-grid-label text-green-300">击杀经济</div>
+                        <div class="stat-grid-value text-green-100" id="pd_kill">0</div>
+                    </div>
+                    <div class="stat-grid-item bg-red-900/20 border-red-500/30">
+                        <div class="stat-grid-label text-red-300">损失经济</div>
+                        <div class="stat-grid-value text-red-100" id="pd_loss">0</div>
+                    </div>
+                    <div class="stat-grid-item bg-blue-900/20 border-blue-500/30">
+                        <div class="stat-grid-label text-blue-300">MVP得分</div>
+                        <div class="stat-grid-value text-blue-100" id="pd_obj">0</div>
+                    </div>
+                    <div class="stat-grid-item bg-yellow-900/20 border-yellow-500/30">
+                        <div class="stat-grid-label text-yellow-300">K/D</div>
+                        <div class="stat-grid-value text-yellow-100" id="pd_kd">0.00</div>
+                    </div>
+                </div>
+
+                <h3 class="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 border-b border-white/10 pb-1">Economics & Combat</h3>
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4">
+                    <div class="stat-grid-item"><div class="stat-grid-label">伤害输出</div><div class="stat-grid-value text-orange-400" id="pd_dmg_dealt">0</div></div>
+                    <div class="stat-grid-item"><div class="stat-grid-label">出兵投入</div><div class="stat-grid-value text-slate-300" id="pd_units">0</div></div>
+                    <div class="stat-grid-item"><div class="stat-grid-label">退款回收</div><div class="stat-grid-value text-emerald-400" id="pd_refund">0</div></div>
+                    <div class="stat-grid-item"><div class="stat-grid-label">投资回报率</div><div class="stat-grid-value text-pink-400" id="pd_roi">0</div></div>
+                </div>
+
+                <h3 class="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 border-b border-white/10 pb-1">Class Preferences</h3>
+                <div id="pd_categories_list" class="flex flex-col gap-2"></div>
+            </div>
+        </div>
+    </div>
+
+        <script>
+
+'use strict';
+// ================= 断箭蛆指数 V5（基于 BATrace 公开 API） =================
+// 与断箭蛆工具（Electron）同口径：候选局直接取自 analysis.trend.points，
+// 取最近 12 场带 ELO 变动的有效对局，按队内 MVP 名次平均，经余弦 s 曲线映射到 1.0-10.0。
+
+// ---------- 配置 ----------
+var API = {
+  INFO: function (id) { return 'https://app.batrace.top/api/players/info?stbid=' + encodeURIComponent(id); },
+  ANALYSIS: function (id) { return 'https://app.batrace.top/api/analysis/player?stbid=' + encodeURIComponent(id); },
+  MATCH: function (id) { return 'https://app.batrace.top/api/analysis/match?matchid=' + encodeURIComponent(id); },
+  SEARCH: function (q) { return 'https://app.batrace.top/api/players/search?q=' + encodeURIComponent(q) + '&limit=20'; }
+};
+var CONFIG = { MATCH_GOAL: 12, MIN_PLAYERS: 10, CANDIDATES: 30, CONCURRENCY: 3, GAP_MS: 300, TIMEOUT_MS: 12000 };
+var TTL = { INFO: 6 * 3600 * 1000, ANALYSIS: 6 * 3600 * 1000, MATCH: 24 * 3600 * 1000, SEARCH: 10 * 60 * 1000 };
+var MATCH_CACHE_MAX = 25;
+var CACHE_PREFIX = 'ba_v5_';
+var HISTORY_KEY = 'ba_maggot_v5_history';
+
+var BREAKDOWN_DEFS = {
+  destruction: { icon: '⚔️', color: 'text-red-400' },
+  damage: { icon: '💥', color: 'text-orange-400' },
+  dlRatio: { icon: '🛡️', color: 'text-emerald-400' },
+  efficiency: { icon: '💰', color: 'text-yellow-400' },
+  objectives: { icon: '🚩', color: 'text-blue-400' },
+  supply: { icon: '🍔', color: 'text-pink-400' }
+};
+var COLOR_STYLES = {
+  'text-red-400': 'bg-red-600/20 border-red-500/50 text-red-300',
+  'text-orange-400': 'bg-orange-600/20 border-orange-500/50 text-orange-300',
+  'text-emerald-400': 'bg-emerald-600/20 border-emerald-500/50 text-emerald-300',
+  'text-yellow-400': 'bg-yellow-600/20 border-yellow-500/50 text-yellow-300',
+  'text-blue-400': 'bg-blue-600/20 border-blue-500/50 text-blue-300',
+  'text-pink-400': 'bg-pink-600/20 border-pink-500/50 text-pink-300'
+};
+var CAT_ICONS = { infantry: '🪖', vehicles: '🚙', support: '🎯', helicopters: '🚁', aircrafts: '✈️', recon: '🔭', logistic: '📦' };
+var CAT_NAMES = {
+  zh: { infantry: '步兵', vehicles: '载具', support: '支援', helicopters: '直升机', aircrafts: '战机', recon: '侦察', logistic: '后勤' },
+  en: { infantry: 'Infantry', vehicles: 'Vehicles', support: 'Support', helicopters: 'Helicopters', aircrafts: 'Aircrafts', recon: 'Recon', logistic: 'Logistics' },
+  ru: { infantry: 'Пехота', vehicles: 'Техника', support: 'Поддержка', helicopters: 'Вертолеты', aircrafts: 'Самолеты', recon: 'Разведка', logistic: 'Логистика' },
+  ja: { infantry: '歩兵', vehicles: '車両', support: '支援', helicopters: 'ヘリ', aircrafts: '航空機', recon: '偵察', logistic: '兵站' }
+};
+
+var DICT = {
+  zh: {
+    title: '断箭蛆指数', subtitle: 'Broken Arrow Behavior Analysis', placeholder: '输入内部数字 ID...',
+    check: '开始检测', loading: '获取数据中...', maggot_index_title: '综合评价',
+    god_range: '神', maggot_range: '蛆', history_title: '最近 12 局有效对局',
+    find_id_btn: '不知道 ID？通过用户名查找', find_match_btn: '只知道对局 ID？通过对局查玩家',
+    kill: '击杀', loss: '损失', obj: 'MVP',
+    levels: ['👑 神', '🦁 团队支柱', '😐 平平淡淡', '🐛 有点蛆', '💩 蛆！'],
+    trend_up: '🚀 最近变强', trend_down: '📉 最近变蛆', trend_flat: '➡️ 实力平稳',
+    err_net: '网络错误，由于跨域限制或接口宕机', err_insufficient: '有效对局不足 12 局',
+    err_not_found: '未找到该玩家', err_no_valid: '近期没有带 ELO 变动的有效对局',
+    err_partial: '有效对局不足 {goal} 场（只凑到 {n} 场完整数据）',
+    fetch_matches: '获取对局数据中...', searching: '搜索中...', found_n: '找到 {n} 位玩家', loading_match: '加载对局中...',
+    search_btn: '查询', match_btn: '获取战绩', no_data: '无战斗数据',
+    lbl_ref_kdr: '平均 KD 排名', lbl_ref_kr: '平均击杀排名', lbl_ref_dr: '生存/经济排名', lbl_ref_or: 'MVP得分排名', lbl_ref_wr: '最近 12 局胜率',
+    res_vic: '胜利', res_def: '失败', res_draw: '平局',
+    tags: { destruction: '歼灭大师', damage: '火力投送', dlRatio: '爱兵如子', efficiency: '精打细算', objectives: '攻防专家', supply: '战场奶妈' }
+  },
+  en: {
+    title: 'BA Maggot Index', subtitle: 'Broken Arrow Analytics', placeholder: 'Numeric ID...',
+    check: 'ANALYZE', loading: 'Fetching API...', maggot_index_title: 'PERFORMANCE RATING',
+    god_range: 'GOD', maggot_range: 'MAGGOT', history_title: 'Last 12 Valid Matches',
+    find_id_btn: 'Search by Name', find_match_btn: 'Search by Match',
+    kill: 'Kills', loss: 'Losses', obj: 'MVP',
+    levels: ['👑 GODLIKE', '🦁 CARRY', '😐 AVERAGE', '🐛 BitMaggot', '💩 MAGGOT!'],
+    trend_up: '🚀 Getting Stronger', trend_down: '📉 Slumping', trend_flat: '➡️ Consistent',
+    err_net: 'Network/CORS Error', err_insufficient: 'Need 12+ matches',
+    err_not_found: 'Player not found.', err_no_valid: 'No valid matches with ELO change.',
+    err_partial: 'Need {goal}+ matches (only {n} complete).',
+    fetch_matches: 'Fetching match data...', searching: 'Searching...', found_n: 'Found {n} players.', loading_match: 'Loading Match...',
+    search_btn: 'Search', match_btn: 'Get Match', no_data: 'No combat data available',
+    lbl_ref_kdr: 'KD Rank', lbl_ref_kr: 'Kill Rank', lbl_ref_dr: 'Econ Rank', lbl_ref_or: 'MVP Score Rank', lbl_ref_wr: 'Win Rate',
+    res_vic: 'VICTORY', res_def: 'DEFEAT', res_draw: 'DRAW',
+    tags: { destruction: 'Master Destroyer', damage: 'Firepower', dlRatio: 'Survivor', efficiency: 'Efficient', objectives: 'Objective Expert', supply: 'Logistics' }
+  },
+  ru: {
+    title: 'BA Maggot Index', subtitle: 'Broken Arrow Analytics', placeholder: 'Числовой ID...',
+    check: 'АНАЛИЗ', loading: 'Загрузка API...', maggot_index_title: 'РЕЙТИНГ ЭФФЕКТИВНОСТИ',
+    god_range: 'БОГ', maggot_range: 'ЛИЧИНКА', history_title: 'Последние 12 матчей',
+    find_id_btn: 'Поиск по имени', find_match_btn: 'Поиск по ID матча',
+    kill: 'Убийства', loss: 'Потери', obj: 'MVP',
+    levels: ['👑 БОГ', '🦁 ТАЩЕР', '😐 СРЕДНЕ', '🐛 НЕМНОГО ЛИЧИНКА', '💩 ЛИЧИНКА!'],
+    trend_up: '🚀 На подъеме', trend_down: '📉 Спад', trend_flat: '➡️ Стабильно',
+    err_net: 'Ошибка сети/CORS', err_insufficient: 'Нужно 12+ матчей',
+    err_not_found: 'Игрок не найден', err_no_valid: 'Нет валидных матчей с изменением ELO',
+    err_partial: 'Нужно {goal}+ матчей (получено {n})',
+    fetch_matches: 'Загрузка матчей...', searching: 'Поиск...', found_n: 'Найдено: {n}', loading_match: 'Загрузка матча...',
+    search_btn: 'Поиск', match_btn: 'Получить', no_data: 'Нет данных о боях',
+    lbl_ref_kdr: 'Ранг KD', lbl_ref_kr: 'Ранг убийств', lbl_ref_dr: 'Ранг экономии', lbl_ref_or: 'Ранг MVP', lbl_ref_wr: 'Винрейт (12 игр)',
+    res_vic: 'ПОБЕДА', res_def: 'ПОРАЖЕНИЕ', res_draw: 'НИЧЬЯ',
+    tags: { destruction: 'Мастер-убийца', damage: 'Огневая мощь', dlRatio: 'Выживаемость', efficiency: 'Эффективность', objectives: 'Захват', supply: 'Снабжение' }
+  },
+  ja: {
+    title: 'BA Maggot Index', subtitle: 'Broken Arrow Analytics', placeholder: '数字IDを入力...',
+    check: '分析開始', loading: 'API取得中...', maggot_index_title: 'パフォーマンス評価',
+    god_range: '神', maggot_range: '地雷', history_title: '直近12試合の記録',
+    find_id_btn: '名前で検索', find_match_btn: 'マッチIDで検索',
+    kill: '撃破', loss: '損失', obj: 'MVP',
+    levels: ['👑 神様', '🦁 キャリー', '😐 一般兵', '🐛 微地雷', '💩 超地雷'],
+    trend_up: '🚀 調子上昇中', trend_down: '📉 調子低下中', trend_flat: '➡️ 実力安定',
+    err_net: '通信エラー', err_insufficient: 'データ不足（12試合未満）',
+    err_not_found: 'プレイヤーが見つかりません', err_no_valid: 'ELO変動のある有効な試合がありません',
+    err_partial: '有効試合が{goal}試合に満たない（{n}試合のみ）',
+    fetch_matches: '試合データ取得中...', searching: '検索中...', found_n: '{n}件見つかりました', loading_match: 'マッチ読み込み中...',
+    search_btn: '検索', match_btn: '取得', no_data: '戦闘データなし',
+    lbl_ref_kdr: 'KDランク', lbl_ref_kr: '撃破ランク', lbl_ref_dr: '経済ランク', lbl_ref_or: 'MVPスコアランク', lbl_ref_wr: '勝率 (直近12戦)',
+    res_vic: '勝利', res_def: '敗北', res_draw: '引分',
+    tags: { destruction: '殲滅マスター', damage: '火力投射', dlRatio: '生存の達人', efficiency: '効率的', objectives: '攻防エキスパート', supply: '戦場の母' }
+  }
+};
+var currentLang = 'zh';
+var CURRENT_MATCH_STATS = [];
+var sessionRequests = 0;
+
+// ---------- 工具 ----------
+function $(id) { return document.getElementById(id); }
+function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
+function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+function isNumeric(s) {
+  s = String(s).trim();
+  if (!s) return false;
+  for (var i = 0; i < s.length; i++) { var c = s.charAt(i); if (c < '0' || c > '9') return false; }
+  return true;
+}
+function t() { return DICT[currentLang]; }
+function fmtKey(key, vars) {
+  var s = DICT[currentLang][key] || key;
+  if (vars) { for (var k in vars) { s = s.split('{' + k + '}').join(String(vars[k])); } }
+  return s;
+}
+
+// ---------- i18n ----------
+function setLang(l) {
+  currentLang = l;
+  try { localStorage.setItem('ba_lang', l); } catch (e) {}
+  document.title = DICT[currentLang].title + ' V5';
+  updateUIStrings();
+}
+function updateUIStrings() {
+  var d = DICT[currentLang];
+  $('lbl_title').innerText = d.title;
+  $('lbl_subtitle').innerText = d.subtitle;
+  $('steamInput').placeholder = d.placeholder;
+  $('btn_check').innerText = d.check;
+  $('lbl_maggot_index_title').innerText = d.maggot_index_title;
+  $('lbl_god_range').innerText = d.god_range;
+  $('lbl_maggot_range').innerText = d.maggot_range;
+  $('lbl_history_title').innerText = d.history_title;
+  $('lbl_find_id_btn').innerText = d.find_id_btn;
+  $('lbl_find_match_btn').innerText = d.find_match_btn;
+  $('lbl_ref_kdr').innerText = d.lbl_ref_kdr;
+  $('lbl_ref_kr').innerText = d.lbl_ref_kr;
+  $('lbl_ref_dr').innerText = d.lbl_ref_dr;
+  $('lbl_ref_or').innerText = d.lbl_ref_or;
+  $('lbl_ref_wr').innerText = d.lbl_ref_wr;
+  $('modal_title').innerText = d.find_id_btn;
+  $('modal_btn_search').innerText = d.search_btn;
+  $('modal_match_title').innerText = d.find_match_btn;
+  $('modal_match_btn_search').innerText = d.match_btn;
+  ['zh', 'en', 'ru', 'ja'].forEach(function (lang) {
+    $('btn_lang_' + lang).className = 'px-3 py-1 md:px-4 md:py-1.5 text-xs rounded-lg transition font-bold ' + (currentLang === lang ? 'bg-cyan-600 text-white shadow-lg' : 'text-slate-400 hover:text-white');
+  });
+}
+
+// ---------- 缓存（localStorage，按接口分级 TTL；对局缓存 LRU 防爆） ----------
+function cacheKey(type, url) { return CACHE_PREFIX + type + '_' + url.replace(/[^a-zA-Z0-9]/g, '_').slice(-56); }
+function cacheGet(key, ttl) {
+  try {
+    var raw = localStorage.getItem(key);
+    if (!raw) return null;
+    var it = JSON.parse(raw);
+    if (Date.now() - it.t < ttl) return it.data;
+  } catch (e) {}
+  return null;
+}
+function cacheSet(key, data) {
+  try { localStorage.setItem(key, JSON.stringify({ t: Date.now(), data: data })); return true; }
+  catch (e) { return false; }
+}
+function matchCacheKeys() {
+  var out = [];
+  try {
+    for (var i = 0; i < localStorage.length; i++) {
+      var k = localStorage.key(i);
+      if (k && k.indexOf(CACHE_PREFIX + 'match_') === 0) out.push(k);
+    }
+  } catch (e) {}
+  return out;
+}
+function trimMatchCache() {
+  var keys = matchCacheKeys();
+  keys.sort(function (a, b) {
+    try { return JSON.parse(localStorage.getItem(a)).t - JSON.parse(localStorage.getItem(b)).t; } catch (e) { return 0; }
+  });
+  while (keys.length > MATCH_CACHE_MAX) {
+    var oldest = keys.shift();
+    try { localStorage.removeItem(oldest); } catch (e) {}
+  }
+}
+function cacheSetMatch(key, data) {
+  if (!cacheSet(key, data)) {
+    // 配额满 → 淘汰最旧的对局缓存后重试一次
+    var keys = matchCacheKeys();
+    keys.sort(function (a, b) {
+      try { return JSON.parse(localStorage.getItem(a)).t - JSON.parse(localStorage.getItem(b)).t; } catch (e) { return 0; }
+    });
+    for (var i = 0; i < Math.min(keys.length, 5); i++) {
+      try { localStorage.removeItem(keys[i]); } catch (e) {}
+    }
+    cacheSet(key, data);
+  }
+  trimMatchCache();
+}
+
+// ---------- API 客户端：直连优先 + 代理兜底 + 超时重试 ----------
+function updateRequestCounter() {
+  var el = $('reqCounter');
+  if (el) el.textContent = 'API ' + sessionRequests;
+}
+function fetchOnce(target, timeoutMs) {
+  var ctrl = new AbortController();
+  var timer = setTimeout(function () { try { ctrl.abort(); } catch (e) {} }, timeoutMs);
+  return fetch(target, { signal: ctrl.signal, cache: 'no-store' })
+    .then(function (res) {
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      return res.text();
+    })
+    .then(function (text) { return JSON.parse(text); })
+    .finally(function () { clearTimeout(timer); });
+}
+function unwrapProxy(data) {
+  if (data && typeof data === 'object' && data.contents !== undefined) {
+    if (typeof data.contents === 'string') { try { return JSON.parse(data.contents); } catch (e) { return data.contents; } }
+    return data.contents;
+  }
+  return data;
+}
+async function apiFetch(url) {
+  var attempts = [
+    function (u) { return u; },
+    function (u) { return 'https://api.allorigins.win/get?url=' + encodeURIComponent(u) + '&cb=' + Date.now(); },
+    function (u) { return 'https://corsproxy.io/?' + encodeURIComponent(u); }
+  ];
+  var lastErr = null;
+  for (var i = 0; i < attempts.length; i++) {
+    for (var r = 0; r < 2; r++) {
+      sessionRequests++;
+      updateRequestCounter();
+      try {
+        var d = await fetchOnce(attempts[i](url), CONFIG.TIMEOUT_MS);
+        if (i === 1) d = unwrapProxy(d);
+        return d;
+      } catch (e) { lastErr = e; await sleep(350); }
+    }
+  }
+  throw lastErr || new Error('NET');
+}
+async function apiGet(url, type) {
+  var key = cacheKey(type, url);
+  var ttl = TTL[type] || (10 * 60 * 1000);
+  var cached = cacheGet(key, ttl);
+  if (cached !== null) return cached;
+  var data = await apiFetch(url);
+  if (type === 'match') cacheSetMatch(key, data); else cacheSet(key, data);
+  return data;
+}
+
+// ---------- 并发小池子（拉取多局对局用） ----------
+async function runPool(items, worker, limit) {
+  var idx = 0;
+  async function next() {
+    while (idx < items.length) {
+      var i = idx++;
+      await worker(items[i], i);
+      await sleep(CONFIG.GAP_MS);
+    }
+  }
+  var pool = [];
+  var n = Math.min(limit || 1, items.length);
+  for (var k = 0; k < n; k++) pool.push(next());
+  await Promise.all(pool);
+}
+
+// ---------- 主流程 ----------
+function updateProgress(percent, status, detail) {
+  $('loadPercent').innerText = percent + '%';
+  $('loadProgressFill').style.width = percent + '%';
+  $('loadStatus').innerText = status;
+  $('loadDetail').innerText = detail;
+}
+
+async function handleCheck() {
+  var input = $('steamInput').value.trim();
+  if (!input) return;
+  $('errorArea').classList.add('hidden');
+  $('loading').classList.remove('hidden');
+  $('resultPanel').classList.add('hidden');
+  $('rightStickerContainer').innerHTML = '';
+  $('unitStickerContainer').innerHTML = '';
+  try {
+    updateProgress(5, t().loading, 'Resolving...');
+    if (!isNumeric(input)) {
+      var searchRes = await apiGet(API.SEARCH(input), 'SEARCH');
+      if (!searchRes || !Array.isArray(searchRes.players) || searchRes.players.length === 0) throw new Error(fmtKey('err_not_found'));
+      input = String(searchRes.players[0].id);
+    }
+    updateProgress(15, t().loading, 'Fetching Player Stats...');
+    var infoRes = await apiGet(API.INFO(input), 'INFO');
+    var analysisRes = await apiGet(API.ANALYSIS(input), 'ANALYSIS');
+    var points = (analysisRes && analysisRes.trend && Array.isArray(analysisRes.trend.points)) ? analysisRes.trend.points : [];
+    var candidates = points.filter(function (p) {
+      return p && p.matchId != null && Math.abs((p.ratingAfter || 0) - (p.ratingBefore || 0)) >= 0.01;
+    }).slice(-CONFIG.CANDIDATES).reverse();
+    if (!candidates.length) throw new Error(fmtKey('err_no_valid'));
+    updateProgress(30, t().loading, t().fetch_matches);
+    var matches = await fetchValidMatches(candidates, input);
+    if (matches.length < CONFIG.MATCH_GOAL) throw new Error(fmtKey('err_partial', { goal: CONFIG.MATCH_GOAL, n: matches.length }));
+    updateProgress(100, 'Done', 'Rendering...');
+    var name = (infoRes && infoRes.info && infoRes.info.name) ? infoRes.info.name : input;
+    saveHistory(input, name);
+    $('userNameDisplay').innerText = name;
+    var lvl = (infoRes && infoRes.info && infoRes.info.level != null) ? infoRes.info.level : 0;
+    $('calcTimeDisplay').innerHTML = 'Lv.' + lvl + ' <span class="mx-1 md:mx-2 opacity-30">|</span> ' + new Date().toLocaleString();
+    computeMaggot(input, matches, analysisRes, infoRes);
+  } catch (e) {
+    $('errorMsg').innerText = (e && e.message) ? e.message : t().err_net;
+    $('errorArea').classList.remove('hidden');
+  } finally {
+    $('loading').classList.add('hidden');
+  }
+}
+
+async function fetchValidMatches(candidates, myUid) {
+  var valid = [];
+  var scanned = 0;
+  await runPool(candidates, async function (point) {
+    scanned++;
+    if (valid.length >= CONFIG.MATCH_GOAL) return;
+    try {
+      var raw = await apiGet(API.MATCH(point.matchId), 'MATCH');
+      if (raw && Array.isArray(raw.mvpRanking) && raw.mvpRanking.length >= CONFIG.MIN_PLAYERS) {
+        var fm = formatMatchData(String(point.matchId), raw, myUid, point);
+        if (fm) valid.push(fm);
+      }
+    } catch (e) { console.warn('skip match', point.matchId, e); }
+    updateProgress(30 + Math.floor((scanned / candidates.length) * 60), t().loading, t().fetch_matches + ' ' + valid.length + '/' + CONFIG.MATCH_GOAL);
+  }, CONFIG.CONCURRENCY);
+  return valid.slice(0, CONFIG.MATCH_GOAL);
+}
+
+// ---------- 单局格式化（mvp + economy + damage + unitComposition） ----------
+function formatMatchData(matchId, matchRaw, myUid, trendPoint) {
+  var mapped = [];
+  var myTeamId = null;
+  (matchRaw.mvpRanking || []).forEach(function (p) {
+    if (String(p.playerId) === String(myUid)) myTeamId = p.teamId;
+    mapped.push({
+      id: p.playerId, name: p.playerName, teamId: p.teamId, isMe: String(p.playerId) === String(myUid),
+      mvpScore: p.score || 0, breakdown: p.breakdown || {}, earnedTags: [],
+      kScore: 0, lScore: 0, dmgDealt: 0, Investment: 0, Refunded: 0, roi: null, unitCategories: [],
+      elo: '---', gain: null
+    });
+  });
+  if (myTeamId === null && mapped.length) myTeamId = mapped[0].teamId;
+  if (myTeamId === null) return null;
+  if (matchRaw.economy && Array.isArray(matchRaw.economy.players)) {
+    matchRaw.economy.players.forEach(function (ep) {
+      var mp = mapped.find(function (q) { return String(q.id) === String(ep.playerId); });
+      if (mp) {
+        mp.kScore = ep.returnValue || 0;
+        mp.Investment = ep.investment || 0;
+        mp.Refunded = ep.refunded || 0;
+        mp.roi = ep.roi;
+        mp.lScore = Math.max(0, (ep.investment || 0) - (ep.refunded || 0));
+      }
+    });
+  }
+  if (matchRaw.damageContribution) {
+    ['teamA', 'teamB'].forEach(function (team) {
+      var arr = matchRaw.damageContribution[team];
+      if (Array.isArray(arr)) {
+        arr.forEach(function (dp) {
+          var mp = mapped.find(function (q) { return q.name === dp.playerName; });
+          if (mp) mp.dmgDealt = dp.damageDealt || 0;
+        });
+      }
+    });
+  }
+  if (matchRaw.unitComposition && Array.isArray(matchRaw.unitComposition.byPlayer)) {
+    matchRaw.unitComposition.byPlayer.forEach(function (up) {
+      var mp = mapped.find(function (q) { return String(q.id) === String(up.playerId); });
+      if (mp) mp.unitCategories = up.categories || [];
+    });
+  }
+  var maxK = 1, maxL = 1;
+  mapped.forEach(function (p) { maxK = Math.max(maxK, p.kScore); maxL = Math.max(maxL, p.lScore); });
+  mapped.forEach(function (p) {
+    p.kPct = (p.kScore / maxK) * 100;
+    p.lPct = (p.lScore / maxL) * 100;
+    p.oPct = p.mvpScore;
+    p.kd = p.kScore / (p.lScore || 1);
+  });
+  var ally = mapped.filter(function (p) { return p.teamId === myTeamId; }).sort(function (a, b) { return b.mvpScore - a.mvpScore; });
+  var enemy = mapped.filter(function (p) { return p.teamId !== myTeamId; }).sort(function (a, b) { return b.mvpScore - a.mvpScore; });
+  var assignTags = function (team) {
+    Object.keys(BREAKDOWN_DEFS).forEach(function (k) {
+      var maxVal = 0;
+      team.forEach(function (p) { maxVal = Math.max(maxVal, p.breakdown[k] || 0); });
+      if (maxVal > 0) {
+        var threshold = maxVal * 0.9;
+        team.forEach(function (p) {
+          if ((p.breakdown[k] || 0) >= threshold) p.earnedTags.push({ key: k, val: p.breakdown[k] || 0 });
+        });
+      }
+    });
+    team.forEach(function (p) { p.earnedTags.sort(function (a, b) { return b.val - a.val; }); });
+  };
+  assignTags(ally);
+  assignTags(enemy);
+  var myObj = ally.find(function (p) { return p.isMe; });
+  if (myObj && trendPoint) {
+    if (trendPoint.ratingAfter != null) myObj.elo = Math.round(trendPoint.ratingAfter);
+    if (trendPoint.ratingAfter != null && trendPoint.ratingBefore != null) myObj.gain = (trendPoint.ratingAfter - trendPoint.ratingBefore).toFixed(1);
+  }
+  var myRank = ally.findIndex(function (p) { return p.isMe; }) + 1;
+  return { id: matchId, isWin: !!(trendPoint && trendPoint.won), ally: ally, enemy: enemy, myRank: myRank || 5 };
+}
+
+// ---------- 蛆指数计算与渲染（与 V4/工具算法一致） ----------
+function computeMaggot(myUid, matches, analysisRes, infoRes) {
+  var kRankSum = 0, oRankSum = 0, kdRankSum = 0, lossRankSum = 0, wins = 0;
+  var tagCounts = {};
+  CURRENT_MATCH_STATS = matches;
+  matches.forEach(function (m) {
+    if (m.isWin) wins++;
+    var calcR = function (list, fn) { var r = list.slice().sort(fn).findIndex(function (p) { return p.isMe; }) + 1; return r === 0 ? 5 : r; };
+    kRankSum += calcR(m.ally, function (a, b) { return b.kScore - a.kScore; });
+    oRankSum += calcR(m.ally, function (a, b) { return b.mvpScore - a.mvpScore; });
+    kdRankSum += calcR(m.ally, function (a, b) { return b.kd - a.kd; });
+    lossRankSum += calcR(m.ally, function (a, b) { return a.lScore - b.lScore; });
+    var myObj = m.ally.find(function (p) { return p.isMe; });
+    if (myObj) myObj.earnedTags.forEach(function (tag) { tagCounts[tag.key] = (tagCounts[tag.key] || 0) + 1; });
+  });
+  var avgRank = matches.reduce(function (s, m) { return s + m.myRank; }, 0) / matches.length;
+  var normalizedRank = (avgRank - 1) / 4;
+  var sCurveValue = (1 - Math.cos(normalizedRank * Math.PI)) / 2;
+  var maggotIndex = 1 + (sCurveValue * 9);
+  var tt = t();
+  var scoreEl = $('maggotScoreDisplay');
+  scoreEl.innerText = maggotIndex.toFixed(1);
+  scoreEl.style.color = maggotIndex <= 3.5 ? '#4ade80' : (maggotIndex <= 7 ? '#facc15' : '#f87171');
+  $('maggotLabel').innerText = tt.levels[maggotIndex <= 2 ? 0 : (maggotIndex <= 4 ? 1 : (maggotIndex <= 6 ? 2 : (maggotIndex <= 8 ? 3 : 4)))];
+  $('meterIndicator').style.left = (((maggotIndex - 1) / 9) * 100) + '%';
+  $('ref_avgKDR').innerText = '#' + (kdRankSum / matches.length).toFixed(1);
+  $('ref_avgKR').innerText = '#' + (kRankSum / matches.length).toFixed(1);
+  $('ref_avgDR').innerText = '#' + (lossRankSum / matches.length).toFixed(1);
+  $('ref_avgOR').innerText = '#' + (oRankSum / matches.length).toFixed(1);
+  $('ref_WR').innerText = Math.round((wins / matches.length) * 100) + '%';
+
+  var rightC = $('rightStickerContainer');
+  var recent3 = matches.slice(0, 3);
+  var older9 = matches.slice(3, 12);
+  var recentAvg = recent3.reduce(function (s, m) { return s + m.myRank; }, 0) / (recent3.length || 1);
+  var olderAvg = older9.reduce(function (s, m) { return s + m.myRank; }, 0) / (older9.length || 1);
+  var trendKey = 'trend_flat';
+  if (recentAvg < olderAvg - 0.4) trendKey = 'trend_up';
+  else if (recentAvg > olderAvg + 0.4) trendKey = 'trend_down';
+  var trendEl = document.createElement('div');
+  trendEl.className = 'tag-sticker bg-slate-700 border border-slate-500 text-slate-300';
+  trendEl.textContent = tt[trendKey];
+  rightC.appendChild(trendEl);
+
+  if (infoRes && infoRes.info && infoRes.info.rating !== undefined) {
+    var eloEl = document.createElement('div');
+    eloEl.className = 'tag-sticker bg-fuchsia-600/20 border-fuchsia-500/50 text-fuchsia-300 flex items-center gap-1.5 font-mono font-bold';
+    eloEl.innerHTML = '<span class="text-lg">🏆</span><span>ELO ' + Math.round(infoRes.info.rating) + '</span>';
+    rightC.appendChild(eloEl);
+  }
+
+  Object.keys(tagCounts).map(function (k) { return [k, tagCounts[k]]; })
+    .sort(function (a, b) { return b[1] - a[1]; })
+    .slice(0, 2)
+    .forEach(function (x) {
+      var def = BREAKDOWN_DEFS[x[0]];
+      if (!def) return;
+      var styleClass = COLOR_STYLES[def.color] || 'bg-slate-800 border-slate-500 text-slate-300';
+      var el = document.createElement('div');
+      el.className = 'tag-sticker ' + styleClass + ' flex items-center gap-2';
+      el.innerHTML = '<span class="text-lg">' + def.icon + '</span><span>' + (tt.tags[x[0]] || x[0]) + '</span>';
+      rightC.appendChild(el);
+    });
+
+  var leftC = $('unitStickerContainer');
+  if (analysisRes && Array.isArray(analysisRes.highlightUnits) && analysisRes.highlightUnits.length > 0) {
+    var units = analysisRes.highlightUnits.slice();
+    var renderUnitSticker = function (unit, icon, colorClass) {
+      if (!unit) return;
+      var el = document.createElement('div');
+      el.className = 'tag-sticker tag-sticker-left ' + colorClass + ' flex items-center gap-2';
+      el.innerHTML = '<span class="text-lg">' + icon + '</span><span>' + esc(unit.unitName || '') + '</span>';
+      leftC.appendChild(el);
+    };
+    units.sort(function (a, b) { return b.totalDamage - a.totalDamage; });
+    var topDmg = units[0];
+    renderUnitSticker(topDmg, '⚡', 'bg-orange-600/20 border-orange-500/50 text-orange-300');
+    units = units.filter(function (u) { return u.unitId !== topDmg.unitId; });
+    units.sort(function (a, b) { return b.spawnCount - a.spawnCount; });
+    var topSpawn = units[0];
+    renderUnitSticker(topSpawn, '🛒', 'bg-blue-600/20 border-blue-500/50 text-blue-300');
+    units = units.filter(function (u) { return u.unitId !== topSpawn.unitId; });
+    units.sort(function (a, b) { return b.avgRoi - a.avgRoi; });
+    renderUnitSticker(units[0], '📈', 'bg-emerald-600/20 border-emerald-500/50 text-emerald-300');
+  }
+
+  $('resultPanel').classList.remove('hidden');
+  $('matchesContainer').innerHTML = matches.map(function (m) {
+    var badgeColor = m.isWin ? 'bg-cyan-600/20 text-cyan-400' : 'bg-red-600/20 text-red-400';
+    var resultText = m.isWin ? tt.res_vic : tt.res_def;
+    var html = '';
+    html += '<div class="glass-panel rounded-[2rem] md:rounded-[3rem] overflow-hidden border-white/10 shadow-2xl">';
+    html += '<div class="bg-white/5 px-4 py-3 md:px-8 md:py-4 flex flex-col md:flex-row justify-between items-start md:items-center text-[10px] md:text-xs font-bold font-mono text-slate-400 gap-2 md:gap-0">';
+    html += '<div class="flex flex-wrap items-center gap-2 md:gap-4 leading-relaxed"><span class="whitespace-nowrap">ID: ' + m.id + '</span></div>';
+    html += '<span class="px-3 py-1 md:px-4 md:py-1 ' + badgeColor + ' rounded-lg font-black uppercase tracking-widest flex items-center gap-2 self-end md:self-auto"><span>Rank #' + m.myRank + '</span><span class="opacity-50">/</span><span>' + resultText + '</span></span>';
+    html += '</div>';
+    html += '<div class="grid grid-cols-1 lg:grid-cols-2 gap-px bg-white/10">';
+    html += '<div class="bg-[#0f172a] p-2 md:p-4">' + renderTeam(m.ally, tt, m.id) + '</div>';
+    html += '<div class="bg-[#0f172a] p-2 md:p-4">' + renderTeam(m.enemy, tt, m.id) + '</div>';
+    html += '</div></div>';
+    return html;
+  }).join('');
+}
+
+function renderTeam(players, tt, matchId) {
+  return players.map(function (p) {
+    var hoverDetail = tt.kill + ': ' + Math.round(p.kScore) + ' | ' + tt.loss + ': ' + Math.round(p.lScore) + ' | MVP: ' + p.mvpScore.toFixed(1);
+    var tagsHtml = '';
+    if (p.earnedTags.length > 0) {
+      tagsHtml = '<div class="flex flex-wrap gap-1 mt-1.5">';
+      p.earnedTags.slice(0, 3).forEach(function (tag) {
+        var def = BREAKDOWN_DEFS[tag.key];
+        var label = tt.tags[tag.key] || tag.key;
+        tagsHtml += '<div class="medal-badge group border-dashed border-white/20 bg-black/30" title="' + esc(label) + ' 评分: ' + tag.val.toFixed(1) + '/100"><span class="text-[10px] filter drop-shadow-md select-none leading-none opacity-90">' + def.icon + '</span><span class="text-[10px] font-bold ' + def.color + ' opacity-80 leading-none whitespace-nowrap">' + esc(label) + '</span></div>';
+      });
+      tagsHtml += '</div>';
+    }
+    var eloHtml;
+    if (p.gain !== null) {
+      var gainNum = parseFloat(p.gain);
+      var sign = gainNum >= 0 ? 'text-green-500' : 'text-red-500';
+      var plus = gainNum > 0 ? '+' : '';
+      eloHtml = '<div class="text-[10px] font-black ' + sign + '">' + plus + p.gain + '</div><div class="text-[9px] font-bold text-slate-500">ELO ' + p.elo + '</div>';
+    } else {
+      eloHtml = '<div class="text-[10px] font-black text-transparent">-</div><div class="text-[9px] font-bold text-slate-600">ELO ---</div>';
+    }
+    var h = '';
+    h += '<div class="teammate-row flex items-center p-2 md:p-3 rounded-xl md:rounded-2xl ' + (p.isMe ? 'is-me' : '') + '" title="' + esc(hoverDetail) + '" onclick="openPlayerDetail(' + matchId + ',' + p.id + ')">';
+    h += '<div class="flex-1 min-w-0 pr-2 md:pr-4 flex flex-col justify-center relative">';
+    h += '<div class="flex justify-between items-start w-full">';
+    h += '<div class="text-xs md:text-sm font-black text-slate-100 truncate mb-0.5 mr-1">' + esc(p.name || 'Unknown') + '</div>';
+    h += '<div class="text-right font-mono flex-shrink-0 flex flex-col items-end leading-none">' + eloHtml + '</div>';
+    h += '</div>' + tagsHtml + '</div>';
+    h += '<div class="w-16 md:w-28 space-y-1 flex-shrink-0">';
+    h += '<div class="flex items-center gap-1"><div class="bar-container"><div class="bar-kill" style="width:' + p.kPct + '%"></div></div></div>';
+    h += '<div class="flex items-center gap-1"><div class="bar-container"><div class="bar-loss" style="width:' + p.lPct + '%"></div></div></div>';
+    h += '<div class="flex items-center gap-1"><div class="bar-container"><div class="bar-obj" style="width:' + p.oPct + '%"></div></div></div>';
+    h += '</div></div>';
+    return h;
+  }).join('');
+}
+
+// ---------- 历史记录 ----------
+function renderHistory() {
+  var h = [];
+  try { h = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]'); } catch (e) { h = []; }
+  var box = $('historyContainer');
+  box.innerHTML = '';
+  h.forEach(function (x) {
+    var chip = document.createElement('div');
+    chip.className = 'history-chip';
+    var name = document.createElement('span');
+    name.className = 'font-bold';
+    name.textContent = x.name || x.id;
+    name.addEventListener('click', function () { $('steamInput').value = x.id; handleCheck(); });
+    var del = document.createElement('span');
+    del.className = 'history-del cursor-pointer';
+    del.textContent = '×';
+    del.addEventListener('click', function () { removeHistory(x.id); });
+    chip.appendChild(name);
+    chip.appendChild(del);
+    box.appendChild(chip);
+  });
+}
+function saveHistory(id, name) {
+  var h = [];
+  try { h = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]'); } catch (e) { h = []; }
+  h = h.filter(function (x) { return String(x.id) !== String(id); });
+  h.unshift({ id: String(id), name: String(name || id) });
+  try { localStorage.setItem(HISTORY_KEY, JSON.stringify(h.slice(0, 10))); } catch (e) {}
+  renderHistory();
+}
+function removeHistory(id) {
+  var h = [];
+  try { h = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]'); } catch (e) { h = []; }
+  h = h.filter(function (x) { return String(x.id) !== String(id); });
+  try { localStorage.setItem(HISTORY_KEY, JSON.stringify(h)); } catch (e) {}
+  renderHistory();
+}
+
+// ---------- 模态框 ----------
+function openPlayerDetail(matchId, playerId) {
+  var match = CURRENT_MATCH_STATS.find(function (m) { return String(m.id) === String(matchId); });
+  if (!match) return;
+  var player = match.ally.find(function (p) { return String(p.id) === String(playerId); }) || match.enemy.find(function (p) { return String(p.id) === String(playerId); });
+  if (!player) return;
+  $('pd_name').innerText = player.name || 'Unknown';
+  $('pd_id').innerText = 'ID: ' + player.id;
+  if (player.gain !== null) {
+    var gainNum = parseFloat(player.gain);
+    $('pd_elo').innerText = 'ELO ' + player.elo + ' (' + (gainNum >= 0 ? '+' : '') + player.gain + ')';
+    $('pd_elo').className = gainNum >= 0 ? 'text-green-400 font-mono' : 'text-red-400 font-mono';
+  } else {
+    $('pd_elo').innerText = 'ELO ---';
+    $('pd_elo').className = 'text-slate-500 font-mono';
+  }
+  $('pd_kill').innerText = Math.round(player.kScore).toLocaleString();
+  $('pd_loss').innerText = Math.round(player.lScore).toLocaleString();
+  $('pd_obj').innerText = player.mvpScore.toFixed(1);
+  $('pd_kd').innerText = player.kd.toFixed(2);
+  $('pd_dmg_dealt').innerText = Math.round(player.dmgDealt).toLocaleString();
+  $('pd_units').innerText = Math.round(player.Investment).toLocaleString();
+  $('pd_refund').innerText = Math.round(player.Refunded).toLocaleString();
+  $('pd_roi').innerText = player.roi !== undefined && player.roi !== null ? player.roi.toFixed(2) : 'N/A';
+  var catsHtml = '';
+  if (player.unitCategories && player.unitCategories.length > 0) {
+    var sortedCats = player.unitCategories.slice().sort(function (a, b) { return b.totalCost - a.totalCost; });
+    catsHtml = sortedCats.map(function (c) {
+      var icon = CAT_ICONS[c.categoryKey] || '❓';
+      var nm = (CAT_NAMES[currentLang] && CAT_NAMES[currentLang][c.categoryKey]) ? CAT_NAMES[currentLang][c.categoryKey] : String(c.categoryKey || '?').toUpperCase();
+      var h = '';
+      h += '<div class="bg-slate-800/60 rounded-lg p-3 flex items-center justify-between border border-white/5 hover:bg-slate-700/60 transition">';
+      h += '<div class="flex items-center gap-3 w-1/3"><span class="text-2xl drop-shadow-md">' + icon + '</span><span class="text-sm font-bold text-slate-200">' + esc(nm) + '</span></div>';
+      h += '<div class="flex-1 flex justify-around text-xs text-slate-400 font-mono">';
+      h += '<div class="flex flex-col items-center"><span class="text-[10px] text-slate-500">QTY</span><span class="text-white">' + c.count + '</span></div>';
+      h += '<div class="flex flex-col items-center"><span class="text-[10px] text-slate-500">COST</span><span class="text-blue-400">' + Math.round(c.totalCost).toLocaleString() + '</span></div>';
+      h += '<div class="flex flex-col items-center"><span class="text-[10px] text-slate-500">DMG</span><span class="text-orange-400">' + Math.round(c.totalDamage).toLocaleString() + '</span></div>';
+      h += '</div></div>';
+      return h;
+    }).join('');
+  } else {
+    catsHtml = '<div class="text-center text-xs text-slate-500 py-6 border border-dashed border-white/10 rounded-lg">' + t().no_data + '</div>';
+  }
+  $('pd_categories_list').innerHTML = catsHtml;
+  $('playerDetailModal').classList.remove('hidden');
+}
+function closePlayerDetailModal() { $('playerDetailModal').classList.add('hidden'); }
+function openSearchModal() { $('idSearchModal').classList.remove('hidden'); }
+function closeSearchModal() { $('idSearchModal').classList.add('hidden'); }
+function openMatchSearchModal() { $('matchSearchModal').classList.remove('hidden'); }
+function closeMatchSearchModal() { $('matchSearchModal').classList.add('hidden'); }
+
+async function doNameSearch() {
+  var name = $('modalSearchInput').value.trim();
+  if (!name) return;
+  var status = $('modalStatusMsg');
+  var list = $('modalResultList');
+  status.innerText = t().searching;
+  list.innerHTML = '';
+  list.classList.remove('hidden');
+  try {
+    var res = await apiGet(API.SEARCH(name), 'SEARCH');
+    if (!res || !Array.isArray(res.players) || res.players.length === 0) { status.innerText = t().err_not_found; return; }
+    status.innerText = fmtKey('found_n', { n: res.players.length });
+    res.players.forEach(function (p) {
+      var btn = document.createElement('button');
+      btn.className = 'w-full text-left p-3 rounded-lg bg-slate-800/50 border border-slate-700 transition hover:bg-orange-900/30';
+      var nameDiv = document.createElement('div');
+      nameDiv.className = 'font-bold text-white';
+      nameDiv.textContent = p.name || '';
+      var idDiv = document.createElement('div');
+      idDiv.className = 'text-xs text-slate-400 font-mono';
+      idDiv.textContent = 'ID: ' + p.id;
+      btn.appendChild(nameDiv);
+      btn.appendChild(idDiv);
+      btn.addEventListener('click', function () { $('steamInput').value = String(p.id); closeSearchModal(); handleCheck(); });
+      list.appendChild(btn);
+    });
+  } catch (e) {
+    status.innerText = 'Error: ' + (e && e.message || '');
+  }
+}
+
+async function doMatchSearch() {
+  var mid = $('matchIdInput').value.trim();
+  if (!mid) return;
+  var status = $('matchModalStatus');
+  var area = $('matchModalResultArea');
+  status.innerText = t().loading_match;
+  area.classList.add('hidden');
+  try {
+    var data = await apiGet(API.MATCH(mid), 'MATCH');
+    if (!data || !Array.isArray(data.mvpRanking)) throw new Error('Invalid match data');
+    var t0 = data.mvpRanking.filter(function (p) { return p.teamId === 0; });
+    var t1 = data.mvpRanking.filter(function (p) { return p.teamId === 1; });
+    var renderCol = function (players, container) {
+      container.innerHTML = '';
+      players.forEach(function (p) {
+        var row = document.createElement('div');
+        row.className = 'p-3 bg-slate-800/50 hover:bg-cyan-900/30 border border-slate-700 rounded-xl cursor-pointer';
+        var nameDiv = document.createElement('div');
+        nameDiv.className = 'font-bold text-white text-sm';
+        nameDiv.textContent = p.playerName || '';
+        var idDiv = document.createElement('div');
+        idDiv.className = 'text-[10px] text-slate-400 font-mono';
+        idDiv.textContent = 'ID: ' + p.playerId;
+        row.appendChild(nameDiv);
+        row.appendChild(idDiv);
+        row.addEventListener('click', function () { $('steamInput').value = String(p.playerId); closeMatchSearchModal(); handleCheck(); });
+        container.appendChild(row);
+      });
+    };
+    renderCol(t0, $('matchModalTeam0'));
+    renderCol(t1, $('matchModalTeam1'));
+    status.innerText = '';
+    area.classList.remove('hidden');
+  } catch (e) {
+    status.innerText = t().err_net;
+  }
+}
+
+// ---------- 初始化 ----------
+window.onload = function () {
+  setLang(localStorage.getItem('ba_lang') || 'zh');
+  renderHistory();
+  updateRequestCounter();
+};
+
+    </script>
+</body>
+</html>
