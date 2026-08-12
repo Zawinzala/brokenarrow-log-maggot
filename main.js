@@ -8,7 +8,7 @@ const { Config, detectSteamLogDir } = require('./src/config');
 const { LogParser } = require('./src/logParser');
 const { LogWatcher } = require('./src/logWatcher');
 const { BatraceClient, Cache, ApiUsage } = require('./src/batrace');
-const { Heartbeat, fetchViaProxy } = require('./src/heartbeat');
+const { Heartbeat } = require('./src/heartbeat');
 const { ApiHealth } = require('./src/apiHealth');
 const { ApmTracker } = require('./src/apm');
 const inputHook = require('./src/inputHook');
@@ -19,10 +19,8 @@ const { MatchArchive } = require('./src/storage');
 const { PlayerTracker, winnerTeamFromMatch } = require('./src/tracker');
 const { zipCreate, zipExtract } = require('./src/zip');
 const { ReplayRecorder } = require('./src/replayRecorder');
-const { ReplayUploader, uploaderMetaFor } = require('./src/replayUploader');
-const { parseReplayKey, encodeReplayKey } = require('./src/s3Client');
-const { REPLAY_PUBLIC_BASE } = require('./src/replayConfig');
-const { localReplayList, localReplayDelete, localReplayClean, localReplayRead } = require('./src/replayLocal');
+const { encodeReplayKey } = require('./src/s3Client');
+const { localReplayList, localReplayDelete, localReplayClean, localReplayRead, uploaderMetaFor } = require('./src/replayLocal');
 const { patchWebmDuration } = require('./src/webmPatch');
 
 // 压制 Windows 图形捕获（WGC）启动采集时的 E_INVALIDARG 噪声日志（录制功能正常，该错误为 Chromium 良性误报）
@@ -44,13 +42,10 @@ let inputHookOk = false; // 输入钩子是否可用
 let tracker = null;      // 玩家追踪库
 let banTimer = null;     // 封禁检查定时器
 let matchTimer = null;   // 本机对局同步定时器
-let replayTimer = null;   // 对局录像补传定时器
 let apiHealth = null;    // API 稳定性健康检查（顶栏三色灯）
 let replayRecorder = null; // 对局录像录制（屏幕截屏合成 WebM）
 let roomToolDebounce = null; // 房间内工具用户检测防抖
-let pendingUploads = new Map(); // 待确认上传的录像：filename -> meta（等用户选 保存并上传/删除）
 let testRecordTimer = null;   // 录制测试计时器（60 秒自动停）
-let replayUploader = null; // 对局录像上传队列（Laf）
 
 // 软件图标：优先使用 build/icon.png（由根目录 logo.png 生成），否则用默认
 function appIcon() {
@@ -105,6 +100,7 @@ app.whenReady().then(() => {
     delayMs: config.get().apiDelayMs,
     cache: new Cache(path.join(app.getPath('userData'), 'batrace-cache.json')),
     usage,
+    extraHeaders: config.get().batraceExtraHeaders || {},
     onUsage: () => send('budget', budgetPayload({}))
   });
   analyzer = new Analyzer(client);
@@ -143,22 +139,12 @@ app.whenReady().then(() => {
     getStateFile: () => path.join(app.getPath('userData'), 'deck-sync.json')
   });
   deckSync.init();
-  // 对局录像：上传队列 + 录制器（设置开启才录；队列每小时重试）
-  replayUploader = new ReplayUploader({
-    dir: path.join(app.getPath('userData'), 'replays'),
-    queueFile: path.join(app.getPath('userData'), 'replay-queue.json'),
-    getConfig: () => config.get(),
-    httpImpl: (u, o) => net.fetch(u, o),
-    netRequestImpl: (opts) => net.request(opts), // 上传进度（getUploadProgress 轮询）
-    onProgress: (key, p) => send('replay:uploadProgress', Object.assign({ key }, p)),
-    onChanged: (s) => send('replay:changed', s)
-  });
+  // 对局录像：录制器（设置开启才录；只存本地，无云端上传）
   replayRecorder = new ReplayRecorder({
     onStatus: (s) => send('replay:recording', s),
     onError: (msg) => { console.error('[replay] ' + msg); replayLog('error: ' + msg); send('replay:recording', { active: false, error: msg }); },
     onLog: (msg) => replayLog(msg)
   });
-  replayUploader.flush().catch(() => {}); // 启动即补传上次未上传的录像
   setInterval(() => {
     const alert = deckSync.check();
     if (alert) send('deck:syncAlert', alert);
@@ -503,15 +489,10 @@ function startSyncTimers() {
     matchTimer = setInterval(() => { syncMyMatches().catch(() => {}); }, 3600 * 1000);
     syncMyMatches().catch(() => {});
   }
-  if (replayUploader) {
-    replayTimer = setInterval(() => { replayUploader.flush().catch(() => {}); }, 3600 * 1000);
-    replayUploader.flush().catch(() => {});
-  }
 }
 function stopSyncTimers() {
   if (banTimer) { clearInterval(banTimer); banTimer = null; }
   if (matchTimer) { clearInterval(matchTimer); matchTimer = null; }
-  if (replayTimer) { clearInterval(replayTimer); replayTimer = null; }
 }
 
 async function syncBanList() {
@@ -813,11 +794,13 @@ function parseVersionText(text) {
 }
 async function checkVersion() {
   try {
-    // 版本/公告从 Cloudflare Worker 拉取（直连 + 免费代理兜底，国内也能收到）
-    const via = await fetchViaProxy((u, o) => net.fetch(u, o), UPDATE_META_URL, { timeoutMs: 10000 });
-    if (!via.ok) return;
+    // 版本/公告/bypass 从 Cloudflare Worker 直连拉取（自有域名，不走任何代理）
     let meta = null;
-    try { meta = JSON.parse(via.text); } catch (e) {}
+    try {
+      const res = await net.fetch(UPDATE_META_URL, { signal: AbortSignal.timeout(10000) });
+      if (res.ok) { try { meta = await res.json(); } catch (e) {} }
+    } catch (e) {}
+    if (!meta || !meta.version) return;
     if (!meta || !meta.version) return;
     const latest = parseVersion(meta.version);
     const local = parseVersion(app.getVersion());
@@ -830,15 +813,25 @@ async function checkVersion() {
       url: meta.exeUrl || UPDATE_EXE_URL
     };
     send('version', versionInfo);
+    // Eero 专属 bypass：update-meta 带 bypassUA 时设 User-Agent + 快速间隔（300ms）；否则 1200ms（避开 1 req/s 限流）
+    let bypassState = { enabled: false, ua: '', delayMs: 1200 };
+    try {
+      const ua = String(meta.bypassUA || '').trim();
+      if (ua && client) {
+        client.extraHeaders = Object.assign({}, client.extraHeaders || {}, { 'User-Agent': ua });
+        client.delayMs = 300;
+        bypassState = { enabled: true, ua, delayMs: 300 };
+      } else if (client) {
+        client.delayMs = 1200;
+      }
+    } catch (e) {}
+    send('bypass:state', bypassState); // 通知渲染层（设置里开发者区隐秘显示）
     // 公告：每次启动弹一次
     if (versionInfo.announcement) send('announcement', { text: versionInfo.announcement, version: versionInfo.latest });
   } catch (e) { /* 离线/失败静默，不打扰使用 */ }
 }
 
 // ---------------- 对局录像辅助 ----------------
-// 从写死配置构造 S3 客户端（当前 Cloudflare R2，App 直连预签名）
-function replayWorkerBase() { return String(config.get().heartbeatUrl || '').replace(/\/+$/, ''); }
-
 function localReplaysDir() { return path.join(app.getPath('userData'), 'replays'); }
 function replayWatchdog() {
   if (!replayRecorder || !replayRecorder.status().active) return;
@@ -857,8 +850,7 @@ function replayLog(msg) {
 
 function replayStatusPayload() {
   return {
-    recording: replayRecorder ? replayRecorder.status() : { active: false, current: null },
-    uploader: replayUploader ? replayUploader.status() : { pending: 0, uploading: 0, lastError: null, queue: [] }
+    recording: replayRecorder ? replayRecorder.status() : { active: false, current: null }
   };
 }
 
@@ -1025,7 +1017,7 @@ function registerIpc() {
   });
 
   // ---- 对局录像（IPC） ----
-  // 录制窗口交回 WebM：落盘 → 取上传者身份 → 入上传队列
+  // 录制窗口交回 WebM：只落盘本地（无云端上传；对局ID可用时按编码名命名，便于解析）
   ipcMain.handle('replay:recorder:save', async (e, payload) => {
     if (!replayRecorder) return { ok: false, message: '未初始化' };
     try {
@@ -1041,46 +1033,29 @@ function registerIpc() {
       // 补 WebM Duration（MediaRecorder 不写，播放器时长=Infinity → 进度条/拖动失效）；失败则原样保存
       const webmBuf = patchWebmDuration(Buffer.from(payload.data), payload.durationSec);
       const fid = String(payload.fid || '');
-      // 录制测试：只存本地、不上传、不弹确认
+      const dir = localReplaysDir();
+      fs.mkdirSync(dir, { recursive: true });
       if (payload.testMode) {
-        try {
-          const d3 = localReplaysDir();
-          fs.mkdirSync(d3, { recursive: true });
-          // 测试录像也按「对局ID__玩家ID__…」命名（随机 5 位数字），便于列表解析
-          const tName = encodeReplayKey({ fid: String(payload.fid || '0'), uploaderId: String(payload.uploaderId || '0'), uploaderName: '[测试]', teamId: 0, mapId: 0, ts: Date.now() }).split('/').pop();
-          fs.writeFileSync(path.join(d3, tName), webmBuf);
-          replayLog('testRecord: 已保存 ' + tName + ' (' + webmBuf.length + 'B)');
-          send('replay:changed', replayUploader.status());
-          send('replay:testResult', { ok: true, file: tName, size: webmBuf.length });
-          return { ok: true, savedLocal: true, message: '测试录制完成，已保存到本地（未上传）' };
-        } catch (e2) { return { ok: false, message: '保存失败: ' + String((e2 && e2.message) || e2) }; }
-      }
-      if (!/^\d+$/.test(fid)) {
-        // 没识别到对局ID：仍保存到本地（不白录），但不上传
-        try {
-          const d2 = localReplaysDir();
-          fs.mkdirSync(d2, { recursive: true });
-          const nofidName = 'nofid_' + Date.now() + '.webm';
-          fs.writeFileSync(path.join(d2, nofidName), webmBuf);
-          replayLog('save: 无对局ID，已存本地 ' + nofidName + ' (' + webmBuf.length + 'B)');
-          try { if (Notification.isSupported()) new Notification({ title: '对局录像', body: '未识别到对局ID，录像已保存到本地（未上传）' }).show(); } catch (e3) {}
-          send('replay:changed', replayUploader.status());
-          return { ok: true, savedLocal: true, message: '未识别到对局ID，录像已保存到本地（未上传）' };
-        } catch (e2) { return { ok: false, message: '保存失败: ' + String((e2 && e2.message) || e2) }; }
+        // 测试录像：随机负数 ID 命名，便于列表解析且绝不会被误当作真实对局
+        const tName = encodeReplayKey({ fid: String(payload.fid || '0'), uploaderId: String(payload.uploaderId || '0'), uploaderName: '[测试]', teamId: 0, mapId: 0, ts: Date.now() }).split('/').pop();
+        fs.writeFileSync(path.join(dir, tName), webmBuf);
+        replayLog('testRecord: 已保存 ' + tName + ' (' + webmBuf.length + 'B)');
+        send('replay:changed', null);
+        send('replay:testResult', { ok: true, file: tName, size: webmBuf.length });
+        return { ok: true, savedLocal: true, message: '测试录制完成，已保存到本地' };
       }
       const meta = uploaderMetaFor(fid, tracker);
-      if (!meta.uploaderId) return { ok: false, message: '未识别到本机玩家身份，不上传' };
-      const dir = path.join(app.getPath('userData'), 'replays');
-      fs.mkdirSync(dir, { recursive: true });
-      const filename = encodeReplayKey({ fid, uploaderId: meta.uploaderId, uploaderName: meta.uploaderName, teamId: meta.teamId, mapId: meta.mapId, ts: Date.now() }).split('/').pop();
-      const localPath = path.join(dir, filename);
-      const buf = webmBuf;
-      fs.writeFileSync(localPath, buf);
-      // 不强制上传：先保存到本地，用户在对局录像列表点「⬆ 上传」自行选择分享
-      send('replay:changed', replayUploader.status());
-      replayLog('save: 已保存 ' + filename + ' (' + buf.length + 'B)，等待用户上传');
-      try { if (Notification.isSupported()) new Notification({ title: '对局录像', body: '本局录像已保存到本地，可在「对局录像」列表点「⬆ 上传」分享' }).show(); } catch (e3) {}
-      return { ok: true, message: '已保存到本地（可在列表点 ⬆ 上传）' };
+      let filename;
+      if (/^\d+$/.test(fid) && meta.uploaderId) {
+        filename = encodeReplayKey({ fid, uploaderId: meta.uploaderId, uploaderName: meta.uploaderName, teamId: meta.teamId, mapId: meta.mapId, ts: Date.now() }).split('/').pop();
+      } else {
+        filename = 'nofid_' + Date.now() + '.webm';
+      }
+      fs.writeFileSync(path.join(dir, filename), webmBuf);
+      send('replay:changed', null);
+      replayLog('save: 已保存 ' + filename + ' (' + webmBuf.length + 'B)');
+      try { if (Notification.isSupported()) new Notification({ title: '对局录像', body: '本局录像已保存到本地' }).show(); } catch (e3) {}
+      return { ok: true, message: '已保存到本地' };
     } catch (err) {
       return { ok: false, message: String((err && err.message) || err) };
     }
@@ -1088,54 +1063,7 @@ function registerIpc() {
   ipcMain.on('replay:recorder:progress', (e, p) => { if (p && p.fid) send('replay:progress', p); });
   ipcMain.on('replay:recorder:preview', (e, dataUrl) => { if (dataUrl && typeof dataUrl === 'string') send('replay:preview', { dataUrl, at: Date.now() }); });
   ipcMain.handle('replay:status', () => replayStatusPayload());
-  ipcMain.handle('replay:list', async (e, fid) => {
-    const base = replayWorkerBase();
-    if (!base) return { list: [], error: '未配置统计服务地址（Worker）' };
-    try {
-      const res = await net.fetch(base + '/replay/list', { signal: AbortSignal.timeout(20000) });
-      const j = await res.json().catch(() => null);
-      if (!res.ok || !j || !j.ok) return { list: [], error: '拉取录像列表失败: HTTP ' + res.status };
-      const items = [];
-      for (const o of (j.list || [])) {
-        const meta = parseReplayKey(o.key);
-        if (!meta) continue;
-        if (fid && String(meta.fid) !== String(fid)) continue;
-        items.push({
-          id: o.key,
-          fid: meta.fid,
-          map: meta.mapId != null ? mapName(meta.mapId) : '',
-          mapId: meta.mapId,
-          uploaderId: meta.uploaderId,
-          uploaderName: meta.uploaderName,
-          teamId: meta.teamId,
-          team: meta.teamId === 0 ? 'Alpha' : meta.teamId === 1 ? 'Bravo' : meta.teamId === 100 ? 'Spectators' : '',
-          size: o.size || 0,
-          createdAt: o.lastModified || meta.ts || 0,
-          durationSec: 0,
-          videoUrl: REPLAY_PUBLIC_BASE + '/' + o.key
-        });
-      }
-      return { list: items, error: null };
-    } catch (err) {
-      return { list: [], error: '拉取录像列表失败: ' + String((err && err.message) || err) };
-    }
-  });
-  ipcMain.handle('replay:delete', async (e, key) => {
-    const base = replayWorkerBase();
-    const me = tracker && tracker.data ? tracker.data.localId : null;
-    if (!base) return { ok: false, message: '未配置统计服务地址' };
-    if (!me) return { ok: false, message: '尚未识别到本机玩家 ID' };
-    try {
-      const url = base + '/replay/delete?key=' + encodeURIComponent(String(key || '')) + '&me=' + encodeURIComponent(String(me));
-      const res = await net.fetch(url, { method: 'DELETE', signal: AbortSignal.timeout(20000) });
-      const j = await res.json().catch(() => null);
-      if (!res.ok || !j || !j.ok) return { ok: false, message: '删除失败: ' + ((j && j.error) || ('HTTP ' + res.status)) };
-      return { ok: true, message: '已删除' };
-    } catch (err) {
-      return { ok: false, message: '删除失败: ' + String((err && err.message) || err) };
-    }
-  });
-  // 本地录像（保留副本；清理只动本地，不碰云端）
+  // 本地录像（只存本地；清理只动本地）
   ipcMain.handle('replay:localList', () => ({ list: localReplayList(localReplaysDir(), mapName) }));
   ipcMain.handle('replay:localDelete', (e, key) => localReplayDelete(localReplaysDir(), key));
   ipcMain.handle('replay:localClean', (e, days) => ({ ok: true, removed: localReplayClean(localReplaysDir(), Number(days) || 0) }));
@@ -1155,32 +1083,7 @@ function registerIpc() {
   });
   ipcMain.handle('replay:setDisplay', (e, id) => { config.set({ replayDisplayId: String(id || '') }); return { ok: true }; });
 
-  ipcMain.handle('replay:localUpload', (e, key) => {
-    const name = String(key || '').split('/').pop() || '';
-    const item = localReplayList(localReplaysDir(), mapName).find((x) => x.id === name);
-    if (!item || !item.fid || !item.uploaderId) return { ok: false, message: '无法识别该本地录像（缺少对局ID/上传者）' };
-    replayUploader.enqueue({ fid: item.fid, mapId: item.mapId, uploaderId: item.uploaderId, uploaderName: item.uploaderName, teamId: item.teamId, filename: name, localPath: item.localPath, size: item.size });
-    replayUploader.flush().catch(() => {});
-    send('replay:changed', replayUploader.status());
-    return { ok: true, message: '已加入上传队列' };
-  });
-  // 用户确认录像：upload=入队上传，delete=删本地放弃上传
-  ipcMain.handle('replay:confirmUpload', (e, { action, key } = {}) => {
-    const name = String(key || '').split('/').pop() || '';
-    const meta = pendingUploads.get(name);
-    if (!meta) return { ok: false, message: '该录像不存在或已处理' };
-    pendingUploads.delete(name);
-    if (action === 'upload') {
-      replayUploader.enqueue({ fid: meta.fid, mapId: meta.mapId, uploaderId: meta.uploaderId, uploaderName: meta.uploaderName, teamId: meta.teamId, filename: name, localPath: meta.localPath, size: meta.size });
-      replayUploader.flush().catch(() => {});
-      send('replay:changed', replayUploader.status());
-      return { ok: true, message: '已保存并加入上传队列' };
-    }
-    // 'later'：保留本地、暂不上传（之后可在录像列表点 ⬆ 上传）
-    send('replay:changed', replayUploader.status());
-    return { ok: true, message: '已保留在本地（稍后可再上传）' };
-  });
-  // 录制测试：录 60 秒，只存本地不上传（排查桌面采集用）
+  // 录制测试：录 60 秒，只存本地（排查桌面采集用）
   ipcMain.handle('replay:testRecord', async () => {
     if (!replayRecorder) return { ok: false, message: '未初始化' };
     if (replayRecorder.status().active) {
@@ -1198,25 +1101,6 @@ function registerIpc() {
     testRecordTimer = setTimeout(() => { testRecordTimer = null; replayLog('testRecord: 60 秒到，停止'); replayRecorder.stop(); }, 60000);
     send('replay:recording', replayRecorder.status());
     return { ok: true, message: '开始录制 60 秒（只存本地，不上传）' };
-  });
-  // 看过云端录像后缓存到本地（保留副本；文件已存在则跳过）
-  ipcMain.handle('replay:cacheRemote', async (e, { key, url } = {}) => {
-    try {
-      const name = String(key || '').split('/').pop() || '';
-      if (!/^[A-Za-z0-9_.-]+\.webm$/i.test(name)) return { ok: false, message: '无效文件名' };
-      const full = path.join(localReplaysDir(), name);
-      if (fs.existsSync(full)) return { ok: true, message: '本地已有该录像' };
-      if (!url || !/^https?:\/\//.test(String(url))) return { ok: false, message: '无效地址' };
-      const res = await net.fetch(String(url), { signal: AbortSignal.timeout(60000) });
-      if (!res.ok) return { ok: false, message: '下载失败: HTTP ' + res.status };
-      const buf = Buffer.from(await res.arrayBuffer());
-      fs.mkdirSync(localReplaysDir(), { recursive: true });
-      fs.writeFileSync(full, buf);
-      send('replay:changed', replayUploader.status());
-      return { ok: true, message: '已缓存到本地', size: buf.length };
-    } catch (err) {
-      return { ok: false, message: '缓存失败: ' + String((err && err.message) || err) };
-    }
   });
   ipcMain.handle('shell:open', (e, url) => {
     if (/^https?:\/\//.test(url || '')) shell.openExternal(url);

@@ -45,7 +45,7 @@ function renderHeartbeat(h) {
     el.textContent = '● ' + h.online + ' 人正在使用';
     el.title = h.lastError
       ? '上次心跳：' + h.lastError + '（自己可能没计入）'
-      : '上次心跳成功于 ' + (h.lastPing ? new Date(h.lastPing).toLocaleTimeString('zh-CN') : '-') + (h.viaProxy ? '（经代理 ' + h.viaProxy + '）' : '');
+      : '上次心跳成功于 ' + (h.lastPing ? new Date(h.lastPing).toLocaleTimeString('zh-CN') : '-');
   } else if (h && h.lastError) {
     el.classList.remove('ok'); el.classList.add('err');
     el.textContent = '● 心跳连接失败';
@@ -473,7 +473,7 @@ function renderArchive(list) {
   el.querySelectorAll('.archive-row[data-fid]').forEach((item) => {
     item.addEventListener('click', (e) => { e.preventDefault(); openMatchDetail(item.dataset.fid); });
   });
-  // 点 📹 直接打开该对局的录像（本地优先，无本地则云端）
+  // 点 📹 直接打开该对局的本地录像
   el.querySelectorAll('.replay-mark').forEach((mk) => {
     mk.addEventListener('click', (e) => {
       e.preventDefault();
@@ -484,7 +484,7 @@ function renderArchive(list) {
   });
 }
 
-// 从对局档案的 📹 打开录像：单个视角直接播；多个（本地多份/云端不同上传者）弹列表选择
+// 从对局档案的 📹 打开录像：单个直接播；多个本地文件弹列表选择
 async function openReplayForFid(fid) {
   try {
     const items = await collectReplayItemsForFid(fid);
@@ -498,36 +498,26 @@ async function openReplayForFid(fid) {
   } catch (e) { setStatus('打开录像失败：' + e.message, false); }
 }
 
-// 收集某对局所有录像视角：本地/云端按上传者合并（同上传者的本地副本+云端算一个视角，播放优先本地）
+// 收集某对局所有本地录像视角（无云端；同一对局可能有多份本地文件）
 async function collectReplayItemsForFid(fid) {
   const q = String(fid);
-  const cloud = await BA.listReplays(q).catch(() => ({ list: [] }));
   const lr = await BA.listLocalReplays().catch(() => null);
   const locals = ((lr && lr.list) || []).filter((x) => String(x.fid) === q);
-  const clouds = ((cloud && cloud.list) || []).filter((x) => String(x.fid) === q);
-  const byUid = {};
-  for (const it of locals) { const k = String(it.uploaderId || ''); (byUid[k] = byUid[k] || { local: null, cloud: null }).local = it; }
-  for (const it of clouds) { const k = String(it.uploaderId || ''); (byUid[k] = byUid[k] || { local: null, cloud: null }).cloud = it; }
-  return Object.keys(byUid).map((uid) => {
-    const g = byUid[uid];
-    const base = g.local || g.cloud;
-    return {
-      fid: q,
-      local: g.local,
-      cloud: g.cloud,
-      source: g.local && g.cloud ? 'both' : g.local ? 'local' : 'cloud',
-      name: base.uploaderName || '',
-      map: base.map || '',
-      team: base.team != null && base.team !== '' ? base.team : base.teamId,
-      teamId: base.teamId,
-      createdAt: base.createdAt || base.endTime,
-      size: base.size,
-      durationSec: base.durationSec
-    };
-  });
+  return locals.map((it) => ({
+    fid: q,
+    local: it,
+    source: 'local',
+    name: it.uploaderName || '',
+    map: it.map || '',
+    team: it.team != null && it.team !== '' ? it.team : it.teamId,
+    teamId: it.teamId,
+    createdAt: it.createdAt || it.endTime,
+    size: it.size,
+    durationSec: it.durationSec
+  }));
 }
 
-// 播放某个视角：本地优先（可离线），否则云端并缓存到本地
+// 播放本地视角（离线可看）
 async function playReplayItem(item) {
   if (item.local) {
     const r = await BA.readLocalReplay(item.local.id);
@@ -536,11 +526,6 @@ async function playReplayItem(item) {
       openReplayPlayer({ id: item.local.id, videoUrl: url, fid: item.fid, name: item.name, map: item.map, isBlob: true });
       return;
     }
-  }
-  if (item.cloud) {
-    openReplayPlayer({ id: item.cloud.id, videoUrl: item.cloud.videoUrl, fid: item.fid, name: item.name, map: item.map });
-    if (item.cloud.videoUrl) BA.cacheRemoteReplay(item.cloud.id, item.cloud.videoUrl).catch(() => {});
-    return;
   }
   setStatus('该对局暂无录像可播放', false);
 }
@@ -555,7 +540,7 @@ function pickReplay(items) {
     wrap.innerHTML = (items || []).map((it, i) => `
       <div class="inv-item replay-pick-item" data-idx="${i}" title="点击播放">
         <span class="r-name">${esc(it.name || '未知')}</span>
-        ${it.source === 'both' ? '<span class="r-src cloud">☁ 云端</span><span class="r-src local">📁 本地</span>' : it.source === 'local' ? '<span class="r-src local">📁 本地</span>' : '<span class="r-src cloud">☁ 云端</span>'}
+        <span class="r-src local">📁 本地</span>
         ${replayTeamTag(it.team != null && it.team !== '' ? it.team : it.teamId)}
         <span class="dim">${it.durationSec ? fmtDuration(it.durationSec) : '-'}</span>
         <span class="dim">${fmtSize(it.size)}</span>
@@ -974,16 +959,13 @@ document.addEventListener('contextmenu', (e) => {
     if (src === 'local' || src === 'both') {
       items.push({ label: '📂 打开本地位置', action: () => BA.openLocalReplayFolder() });
     }
-    if ((src === 'cloud' || src === 'both') && row.dataset.video) {
-      items.push({ label: '🌐 在浏览器打开云端录像', action: () => openLink(row.dataset.video) });
-    }
+
     if (fid) {
       items.push({ label: '📊 打开对局详情', action: () => openMatchDetail(fid) });
       items.push({ label: '🌐 在 BATrace 打开对局', action: () => openLink(MATCH_URL(fid)) });
     }
     if (src === 'both') {
-      items.push({ label: '🗑 删除本地副本', action: () => deleteReplayRow(row) });
-      items.push({ label: '☁ 删除云端录像', action: () => deleteCloudReplayRow(row) });
+    items.push({ label: '🗑 删除本地录像', action: () => deleteReplayRow(row) });
     } else {
       items.push({ label: '🗑 删除录像', action: () => deleteReplayRow(row) });
     }
@@ -1241,23 +1223,16 @@ function renderBanAlert(d) {
   $('banAlertModal').classList.remove('hidden');
 }
 // ---------- 对局录像（对象存储直传） ----------
-let replayFids = new Set(); // 有录像的对局 ID（云端列表 + 待上传队列）
-let replayWarnGb = 6;       // 云端录像存储提醒阈值（免费上限 10GB）
+let replayFids = new Set(); // 有本地录像的对局 ID
 let replayRecordingActive = false; // 当前是否在录制：预览框只允许在录制时显示
-const replayUploading = new Map(); // 本地录像名 -> { current, total }：上传中状态（重渲染后仍保持禁用+进度）
 function renderReplayStatus(s) {
   const el = $('replayStatus');
   if (!el) return;
   if (!s) { el.textContent = ''; return; }
   const rec = s.recording || {};
-  const up = s.uploader || {};
   const bits = [];
   if (rec && rec.active) bits.push('🔴 正在录制' + (rec.current && rec.current.fid ? ' #' + rec.current.fid : ''));
-  if (up && up.pending) bits.push('待上传 ' + up.pending + ' 个');
-  if (up && up.storageTotal != null) bits.push('☁ 云端 ' + fmtSize(up.storageTotal));
-  if (up && up.uploading) bits.push('上传中…');
   el.textContent = bits.join(' ｜ ');
-  el.title = (up && up.lastError) ? up.lastError : '';
 }
 // 录制小预览（对局录像模块内置，录制时每秒刷新，确认录的是哪块屏）
 function setReplayPreview(active, status) {
@@ -1272,8 +1247,6 @@ function setReplayPreview(active, status) {
 function updateReplayFids(list, status) {
   replayFids = new Set();
   for (const it of (list || [])) if (it && it.fid) replayFids.add(String(it.fid));
-  const up = status && status.uploader;
-  if (up && Array.isArray(up.queue)) for (const q of up.queue) if (q && q.fid) replayFids.add(String(q.fid));
   if (archiveList && archiveList.length) renderArchive(archiveList); // 刷新对局档案的 📹 标记
 }
 
@@ -1283,36 +1256,15 @@ async function refreshReplayList(fid, opts) {
   const q = (fid != null && fid !== '') ? String(fid) : '';
   if (!(opts && opts.silent)) el.innerHTML = '<span class="dim">载入录像列表…</span>'; // silent 时不清空，避免上传中列表闪烁
   try {
-    const cloud = await BA.listReplays(q).catch(() => ({ list: [], error: null }));
     const lr = await BA.listLocalReplays().catch(() => null);
     const localList = (lr && lr.list) || [];
     const list = [];
-    if (cloud && Array.isArray(cloud.list)) for (const it of cloud.list) list.push({ ...it, source: 'cloud' });
-    // 云端存储告警（免费上限 10GB，绝不自动删除）
-    (function () {
-      const w = $('replayStorageWarn');
-      if (!w) return;
-      let total = 0;
-      for (const it of cloud && cloud.list ? cloud.list : []) total += it.size || 0;
-      const gb = total / (1024 * 1024 * 1024);
-      if (gb >= replayWarnGb) {
-        w.classList.remove('hidden');
-        w.textContent = '⚠ 云端录像已用 ' + gb.toFixed(1) + ' GB（免费上限 10GB），请在录像列表手动清理；客户端绝不自动删除。';
-      } else {
-        w.classList.add('hidden');
-      }
-    })();
     for (const it of localList) { if (q && String(it.fid) !== String(q)) continue; list.push({ ...it, source: 'local' }); }
-    if ((cloud && cloud.error) && !list.length) {
-      el.innerHTML = '<div class="replay-error">' + esc(cloud.error) + '</div>';
-      updateReplayFids([], null);
-      return;
-    }
     renderReplayList(list);
-    BA.getReplayStatus().then((st) => updateReplayFids(list, st)).catch(() => updateReplayFids(list, null));
+    updateReplayFids(list);
   } catch (e) {
     el.innerHTML = '<div class="replay-error">载入失败：' + esc(e.message) + '</div>';
-    updateReplayFids([], null);
+    updateReplayFids([]);
   }
 }
 function replayTeamTag(t) {
@@ -1334,7 +1286,7 @@ function fmtSize(n) {
 function renderReplayList(list) {
   const el = $('replayList');
   if (!el) return;
-  if (!list.length) { el.innerHTML = '<div class="replay-empty">暂无录像。开启「自动录制」后打一局，局结束会保存到本地，点「⬆ 上传」即可分享到云端。</div>'; return; }
+  if (!list.length) { el.innerHTML = '<div class="replay-empty">暂无录像。开启「自动录制」后打一局，局结束会自动保存到本地。</div>'; return; }
   const byFid = {};
   for (const it of list) {
     const k = String(it.fid || '未知');
@@ -1356,53 +1308,35 @@ function renderReplayList(list) {
   bindReplayRows(el);
 }
 
-// 同一 (对局ID, 上传者) 的云端/本地合并为一行：云端下载到本地后显示 [☁ 云端][📁 本地] 双标签，播放优先本地
+// 每个本地文件一行（无云端；同一对局多份本地文件各自成行）
 function mergeReplayRows(items) {
-  const byUid = {};
-  for (const it of items) {
-    const k = String(it.uploaderId || '');
-    (byUid[k] = byUid[k] || []).push(it);
-  }
-  return Object.keys(byUid).map((uid) => {
-    const arr = byUid[uid];
-    const local = arr.find((x) => x.source === 'local') || null;
-    const cloud = arr.find((x) => x.source === 'cloud') || null;
-    const base = local || cloud;
-    return {
-      fid: base.fid,
-      name: (local && local.uploaderName) || (cloud && cloud.uploaderName) || '',
-      map: base.map || '',
-      team: base.team != null && base.team !== '' ? base.team : base.teamId,
-      teamId: base.teamId,
-      durationSec: base.durationSec,
-      size: base.size,
-      createdAt: base.createdAt || base.endTime,
-      source: local && cloud ? 'both' : local ? 'local' : 'cloud',
-      localId: local ? local.id : '',
-      cloudId: cloud ? cloud.id : '',
-      video: cloud ? cloud.videoUrl : ''
-    };
-  });
+  return (items || []).map((it) => ({
+    fid: it.fid,
+    name: it.uploaderName || '',
+    map: it.map || '',
+    team: it.team != null && it.team !== '' ? it.team : it.teamId,
+    teamId: it.teamId,
+    durationSec: it.durationSec,
+    size: it.size,
+    createdAt: it.createdAt || it.endTime,
+    source: 'local',
+    localId: it.id || '',
+    cloudId: '',
+    video: ''
+  }));
 }
 
 function replayRowHtml(r) {
   const negative = String(r.fid || '').startsWith('-');
-  const badge = r.source === 'both' ? '<span class="r-src cloud">☁ 云端</span><span class="r-src local">📁 本地</span>'
-    : r.source === 'local' ? (negative ? '<span class="r-src test">🧪 测试</span>' : '<span class="r-src local">📁 本地</span>')
-    : '<span class="r-src cloud">☁ 云端</span>';
-  const canUpload = r.source === 'local' && !negative;
-  const up = (r.localId && replayUploading.has(r.localId)) ? replayUploading.get(r.localId) : null;
-  const upPct = up ? (Number(up.total) ? Math.min(100, Math.round(Number(up.current) / Number(up.total) * 100)) : 0) : 0;
-  const upHtml = canUpload ? `<button class="btn btn-accent r-up"${up ? ' disabled' : ''} title="上传到服务器（可选）">⬆ 上传</button><span class="r-progress${up ? '' : ' hidden'}"><span class="r-progress-track"><span class="r-progress-bar" style="width:${upPct}%"></span></span><em class="r-progress-pct">${upPct}%</em></span>` : '';
+  const badge = negative ? '<span class="r-src test">🧪 测试</span>' : '<span class="r-src local">📁 本地</span>';
   return `
-    <div class="replay-row" data-fid="${esc(r.fid)}" data-name="${esc(r.name)}" data-map="${esc(r.map)}" data-source="${r.source}" data-local="${esc(r.localId)}" data-cloud="${esc(r.cloudId)}" data-video="${esc(r.video)}" title="右键：打开位置 / 对局详情 / BATrace / 删除">
+    <div class="replay-row" data-fid="${esc(r.fid)}" data-name="${esc(r.name)}" data-map="${esc(r.map)}" data-source="local" data-local="${esc(r.localId)}" data-cloud="" data-video="" title="右键：打开位置 / 对局详情 / BATrace / 删除">
       <span class="r-name">${esc(r.name || '未知')}</span>
       ${badge}
       ${replayTeamTag(r.team != null && r.team !== '' ? r.team : r.teamId)}
       <span class="dim">${r.durationSec ? fmtDuration(r.durationSec) : '-'}</span>
       <span class="dim">${fmtSize(r.size)}</span>
       <span class="dim">${fmtTime(r.createdAt)}</span>
-      ${upHtml}
       <button class="btn btn-ghost r-play">▶ 播放</button>
       <button class="r-del" title="删除这条录像">🗑</button>
     </div>`;
@@ -1411,7 +1345,6 @@ function replayRowHtml(r) {
 function bindReplayRows(el) {
   el.querySelectorAll('.replay-row').forEach((row) => {
     const localId = row.dataset.local;
-    const cloudId = row.dataset.cloud;
     row.querySelector('.r-play').addEventListener('click', async (e) => {
       e.stopPropagation();
       if (localId) {
@@ -1423,25 +1356,7 @@ function bindReplayRows(el) {
             openReplayPlayer({ id: localId, videoUrl: url, fid: row.dataset.fid, name: row.dataset.name, map: row.dataset.map, isBlob: true });
           } else { setStatus(((r && r.message) || '本地文件读取失败'), false); }
         } catch (err) { setStatus('播放失败：' + err.message, false); }
-        return;
       }
-      openReplayPlayer({ id: cloudId, videoUrl: row.dataset.video, fid: row.dataset.fid, name: row.dataset.name, map: row.dataset.map });
-      // 看过云端录像后缓存到本地（保留副本，断网也能看）→ 列表自动合并为 [云端][本地] 一行
-      if (row.dataset.video) BA.cacheRemoteReplay(cloudId, row.dataset.video).catch(() => {});
-    });
-    const upBtn = row.querySelector('.r-up');
-    if (upBtn) upBtn.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      if (upBtn.disabled) return;
-      upBtn.disabled = true;
-      setRowUploadProgress(localId, { current: 0, total: 0 }); // 立即显示进度条
-      try {
-        const r = await BA.localUpload(localId);
-        if (!r || !r.ok) { setRowUploadProgress(localId, { done: true }); setStatus((r && r.message) || '上传失败', false); }
-        else setStatus((r && r.message) || '已加入上传队列', true);
-        BA.getReplayStatus().then(renderReplayStatus).catch(() => {});
-        refreshLocalReplayList();
-      } catch (err) { setRowUploadProgress(localId, { done: true }); setStatus('上传失败：' + err.message, false); }
     });
     row.querySelector('.r-del').addEventListener('click', async (e) => {
       e.stopPropagation();
@@ -1449,67 +1364,20 @@ function bindReplayRows(el) {
     });
   });
 }
-// 行内上传进度：根据 onReplayUploadProgress 事件就地更新进度条/按钮（不重载列表）
-function setRowUploadProgress(key, state) {
-  const row = document.querySelector('.replay-row[data-local="' + CSS.escape(String(key)) + '"]');
-  const wrap = row ? row.querySelector('.r-progress') : null;
-  const btn = row ? row.querySelector('.r-up') : null;
-  if (state && state.done) {
-    replayUploading.delete(String(key));
-    if (row) { if (wrap) wrap.classList.add('hidden'); if (btn) { btn.disabled = false; btn.textContent = '⬆ 上传'; } }
-    if (!state.ok) setStatus((state.error ? '上传失败：' + state.error : '上传失败，请稍后重试'), false);
-    return;
-  }
-  replayUploading.set(String(key), { current: Number((state && state.current) || 0), total: Number((state && state.total) || 0) });
-  if (!row) return;
-  if (btn) btn.disabled = true;
-  if (!wrap) return;
-  wrap.classList.remove('hidden');
-  const bar = wrap.querySelector('.r-progress-bar');
-  const pct = wrap.querySelector('.r-progress-pct');
-  const total = Number((state && state.total) || 0);
-  const current = Number((state && state.current) || 0);
-  const p = total ? Math.min(100, Math.round(current / total * 100)) : 0;
-  if (bar) bar.style.width = p + '%';
-  if (pct) pct.textContent = p + '%';
-}
+
 async function deleteReplayRow(row) {
-  // 合并行（云端+本地）默认只删本地副本，云端共享录像不会被动到
-  const src = row.dataset.source;
   const localId = row.dataset.local;
-  const cloudId = row.dataset.cloud;
-  let msg, run;
-  if (src === 'both') {
-    msg = '确定删除这条本地录像吗？（云端录像不受影响，仍可在线观看）';
-    run = () => BA.deleteLocalReplay(localId);
-  } else if (src === 'local') {
-    msg = '确定删除这条本地录像吗？（不影响云端）';
-    run = () => BA.deleteLocalReplay(localId);
-  } else {
-    msg = '确定删除这条云端录像吗？（本地副本不受影响）';
-    run = () => BA.deleteReplay(cloudId);
-  }
-  const ok = await askConfirm(msg);
+  if (!localId) return;
+  const ok = await askConfirm('确定删除这条本地录像吗？');
   if (!ok) return;
   try {
-    const r = await run();
+    const r = await BA.deleteLocalReplay(localId);
     setStatus((r && r.message) || '已删除', !!(r && r.ok));
     refreshReplayList($('replaySearch').value.trim());
   } catch (err) { setStatus('删除失败：' + err.message, false); }
 }
 
-// 显式删除云端共享录像（仅右键菜单触发，避免误删他人可见的录像）
-async function deleteCloudReplayRow(row) {
-  const cloudId = row.dataset.cloud || row.dataset.id;
-  if (!cloudId) return;
-  const ok = await askConfirm('确定删除这条云端录像吗？这是共享录像，删除后其他人也无法观看；本地副本不受影响。');
-  if (!ok) return;
-  try {
-    const r = await BA.deleteReplay(cloudId);
-    setStatus((r && r.message) || '已删除', !!(r && r.ok));
-    refreshReplayList($('replaySearch').value.trim());
-  } catch (err) { setStatus('删除失败：' + err.message, false); }
-}
+
 let replayBlobUrl = null;
 function openReplayPlayer(item) {
   if (replayBlobUrl) { URL.revokeObjectURL(replayBlobUrl); replayBlobUrl = null; }
@@ -1520,8 +1388,8 @@ function openReplayPlayer(item) {
   if (item.isBlob) replayBlobUrl = item.videoUrl;
   $('replayModal').classList.remove('hidden');
   const btns = document.querySelectorAll('.replay-speed-btn');
-  // 倍速档位：1x→5 倍速（默认快速浏览）、2x→10、3x→15
-  const setRate = (r) => { v.playbackRate = r * 5; btns.forEach((b) => b.classList.toggle('active', Number(b.dataset.rate) === r)); };
+  // 倍速档位：1 秒/帧，1x=实时、2x=2 倍、3x=3 倍
+  const setRate = (r) => { v.playbackRate = r; btns.forEach((b) => b.classList.toggle('active', Number(b.dataset.rate) === r)); };
   btns.forEach((b) => { b.onclick = () => setRate(Number(b.dataset.rate)); });
   setRate(1);
   if (v.src) v.play().catch(() => {});
@@ -1546,29 +1414,7 @@ function pickDisplay(list) {
   });
 }
 
-let replayConfirmKey = null;
-function onConfirmUpload(d) {
-  replayConfirmKey = (d && d.key) || null;
-  const el = $('replayConfirmText');
-  if (!el) return;
-  el.innerHTML = '对局 <b>' + esc((d && d.fid) || '') + '</b>（' + esc((d && d.map) || '未知地图') + '，' + fmtSize(d && d.size) + '）已录制完成。<br>' +
-    '<span>选择「保存并上传」= 保存到本地并上传到服务器（别人可查看）；选择「稍后·保留本地」= 只留本地、之后再传。</span>';
-  const mm = $('replayConfirmModal');
-  if (mm) mm.classList.remove('hidden');
-}
-async function replayConfirm(action) {
-  const k = replayConfirmKey;
-  replayConfirmKey = null;
-  const mm = $('replayConfirmModal');
-  if (mm) mm.classList.add('hidden');
-  if (!k) return;
-  try {
-    const r = await BA.confirmUpload(action, k);
-    setStatus((r && r.message) || (action === 'upload' ? '已加入上传队列' : '已删除'), true);
-    refreshLocalReplayList();
-    refreshReplayList($('replaySearch').value.trim());
-  } catch (e) { setStatus('操作失败：' + e.message, false); }
-}
+
 
 function closeReplayPlayer() {
   const v = $('replayVideo');
@@ -1598,7 +1444,7 @@ async function refreshLocalReplayList() {
         <button class="r-del" data-key="${esc(it.id)}" title="删除这条本地录像">🗑</button>
       </div>`).join('');
     el.querySelectorAll('.r-del').forEach((b) => b.addEventListener('click', async () => {
-      const ok = await askConfirm('确定删除这条本地录像吗？（不影响云端）');
+      const ok = await askConfirm('确定删除这条本地录像吗？');
       if (!ok) return;
       try {
         const r = await BA.deleteLocalReplay(b.dataset.key);
@@ -1706,14 +1552,38 @@ function setThemePicker(name) {
 async function runMaggot(stbid, name) {
   const area = $('maggotArea');
   $('maggotCalls').textContent = '';
-  area.innerHTML = '<div class="dim" id="maggotProgress">查蛆指数中：拉取最近 12 场有效对局明细（冷查约 13 次调用，24 小时缓存后仅 1 次）…</div>';
+  setMaggotBusy(true);
+  setMaggotProgress('查蛆指数中：拉取最近 12 场有效对局明细（冷查约 13 次调用，24 小时缓存后仅 1 次）…', 0);
   try {
     const r = await BA.maggotReport(stbid);
     if (r.error) { area.innerHTML = `<div class="loss">${esc(r.error)}</div>`; return; }
     renderMaggot(r, name);
   } catch (e) {
     area.innerHTML = `<div class="loss">蛆查失败：${esc(e.message)}</div>`;
+  } finally {
+    setMaggotBusy(false);
+    hideMaggotProgress();
   }
+}
+
+// 查询期间禁用所有「查蛆指数」入口按钮；结束后恢复
+function setMaggotBusy(busy) {
+  ['btnMaggot', 'btnMaggotFromReport', 'btnInvMaggot'].forEach((id) => {
+    const el = $(id);
+    if (el) el.disabled = !!busy;
+  });
+}
+// 进度行：显示并更新文字/百分比
+function setMaggotProgress(text, pct) {
+  const row = $('maggotProgressRow');
+  if (row) row.classList.remove('hidden');
+  const t = $('maggotProgressText'); if (t) t.textContent = text || '';
+  const b = $('maggotProgressBar'); if (b) b.style.width = Math.max(0, Math.min(100, Number(pct) || 0)) + '%';
+  const p = $('maggotProgressPct'); if (p) p.textContent = (pct != null ? Math.round(pct) + '%' : '');
+}
+function hideMaggotProgress() {
+  const row = $('maggotProgressRow');
+  if (row) row.classList.add('hidden');
 }
 
 function renderMaggot(r, name) {
@@ -1765,6 +1635,18 @@ function renderMaggot(r, name) {
 }
 
 // ---------- 版本提醒 ----------
+// 开发者隐秘提示：BATrace 专属 bypass 状态（设置 → 开发者测试区）
+function renderBypassHint(s) {
+  const el = $('bypassHint');
+  if (!el) return;
+  if (s && s.enabled) {
+    el.textContent = '⚡ 开发者：BATrace 专属提速已启用（间隔 ' + (s.delayMs || 300) + 'ms）';
+    el.style.color = '#4ade80';
+  } else {
+    el.textContent = 'BATrace 请求间隔 1200ms（无专属提速）';
+    el.style.color = '';
+  }
+}
 function renderVersion(v) {
   if (!v) return;
   lastVersionInfo = v;
@@ -1820,8 +1702,14 @@ function bindUI() {
 
   on('btnPrevMatch', 'click', togglePrevView);
   on('btnReQuery', 'click', () => {
-    if (viewMode === 'prev') exitPrevView();
     if (querying) return;
+    if (viewMode === 'prev' && prevMatch && prevMatch.players && prevMatch.players.length) {
+      // 上一局视图：重新粗查上一局名单（保持上一局视图，不跳回当前）
+      querying = true;
+      const players = prevMatch.players.filter((p) => p.id != null).map((p) => ({ id: p.id, name: p.name, team: p.team }));
+      BA.queryRoster(players).catch(() => { querying = false; });
+      return;
+    }
     querying = true;
     BA.queryCurrentMatch().catch(() => { querying = false; });
   });
@@ -1919,7 +1807,7 @@ function bindUI() {
   on('setReplayEnabled', 'change', async () => {
     const el = $('setReplayEnabled');
     if (el && el.checked) {
-      const ok = await askConfirm('开启后，每局会自动录制屏幕画面并保存到本地，你在「对局录像」列表点「⬆ 上传」才会上传分享。确定开启吗？');
+      const ok = await askConfirm('开启后，每局会自动录制屏幕画面并保存到本地。确定开启吗？');
       if (!ok) { el.checked = false; return; }
       // 每次开启都让用户选/确认游戏所在显示器（多屏时）
       const list = await BA.listDisplays().catch(() => []);
@@ -1933,13 +1821,10 @@ function bindUI() {
     if (el && el.checked) refreshReplayList($('replaySearch').value.trim());
   });
   on('btnDisplayPickClose', 'click', () => { $('displayPickerModal').classList.add('hidden'); if (displayPickResolve) { displayPickResolve(null); displayPickResolve = null; } });
-  on('btnReplayConfirmUpload', 'click', () => replayConfirm('upload'));
-  on('btnReplayConfirmLater', 'click', () => replayConfirm('later'));
-  on('btnReplayConfirmClose', 'click', () => { replayConfirmKey = null; const mm = $('replayConfirmModal'); if (mm) mm.classList.add('hidden'); });
   on('btnReplayClose', 'click', closeReplayPlayer);
   on('btnReplayPickerClose', 'click', () => { $('replayPickerModal').classList.add('hidden'); if (replayPickResolve) { replayPickResolve(null); replayPickResolve = null; } });
   on('btnLocalClean30', 'click', async () => {
-    const ok = await askConfirm('删除 30 天前的本地录像？（云端不受影响）');
+    const ok = await askConfirm('删除 30 天前的本地录像？');
     if (!ok) return;
     try {
       const r = await BA.cleanLocalReplays(30);
@@ -1950,7 +1835,7 @@ function bindUI() {
   });
   on('btnOpenLocalReplay', 'click', () => { BA.openLocalReplayFolder(); });
   on('btnLocalCleanAll', 'click', async () => {
-    const ok = await askConfirm('确定删除全部本地录像吗？（云端不受影响）');
+    const ok = await askConfirm('确定删除全部本地录像吗？');
     if (!ok) return;
     try {
       const r = await BA.cleanLocalReplays(0);
@@ -1992,7 +1877,6 @@ async function init() {
   setApmVisible(!!cfg.inputHookEnabled);
   setBanCardVisible(!!cfg.banCardVisible);
   const repSw = $('setReplayEnabled'); if (repSw) repSw.checked = !!cfg.replayEnabled;
-  if (cfg.replayWarnGb) replayWarnGb = Number(cfg.replayWarnGb) || 6;
   refreshReplayList('');
   if (cfg.logDir) {
     const v = await BA.validateDir(cfg.logDir);
@@ -2063,7 +1947,6 @@ async function init() {
   BA.getBans().then(renderBans).catch(() => {});
   BA.onBansChanged((d) => { if (banView === 'met') { banView = 'all'; const btn = $('btnBanCheaters'); if (btn) btn.textContent = '🔍 我遇到过的作弊者'; } renderBans(d && d.list); });
   BA.onBanAlert(renderBanAlert);
-  BA.onConfirmUpload(onConfirmUpload);
   BA.onTestResult((d) => {
     if (!d) return;
     const el = $('testResult');
@@ -2087,7 +1970,6 @@ async function init() {
   BA.onReplayProgress(() => { BA.getReplayStatus().then(renderReplayStatus).catch(() => {}); });
   BA.onReplayChanged(() => { BA.getReplayStatus().then(renderReplayStatus).catch(() => {}); refreshReplayList($('replaySearch').value.trim(), { silent: true }); });
   // 预览帧持续更新图片；只有确实在录制时才显示（防止停止后残留帧把它重新点亮）
-  BA.onReplayUploadProgress((d) => { if (d && d.key) { setRowUploadProgress(d.key, d); if (d.done) BA.getReplayStatus().then(renderReplayStatus).catch(() => {}); } });
   BA.onReplayPreview((d) => {
     const img = $('replayPreviewImg');
     if (!img || !d || !d.dataUrl) return;
@@ -2105,11 +1987,12 @@ async function init() {
     if (card && card.dataset.id) loadReport(card.dataset.id, card.dataset.name);
   });
   BA.onMaggotProgress((d) => {
-    const el = $('maggotProgress');
-    if (el) el.textContent = `查蛆指数中：已解析 ${d.done}/${d.total} 场有效对局（扫描 ${d.scanned}/${d.of}）…`;
+    const pct = d.total ? (d.done / d.total) * 100 : 0;
+    setMaggotProgress(`查蛆指数中：已解析 ${d.done}/${d.total} 场有效对局（扫描 ${d.scanned}/${d.of}）…`, pct);
   });
   BA.getVersion().then(renderVersion).catch(() => {});
   BA.onVersion(renderVersion);
+  BA.onBypassState(renderBypassHint);
   BA.onAnnouncement((d) => { if (d && d.text) { const el = $('announcementText'); if (el) el.textContent = d.text; $('announcementModal').classList.remove('hidden'); } });
 }
 

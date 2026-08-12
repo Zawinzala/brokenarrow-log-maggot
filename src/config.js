@@ -9,7 +9,8 @@ const DEFAULTS = {
   // 监听轮询间隔（毫秒）
   pollMs: 1500,
   // batrace 请求最小间隔（毫秒），避免请求过快
-  apiDelayMs: 350,
+  apiDelayMs: 1200, // 无 bypass 时的全局 BATrace 间隔（≈1 次/秒，避开 Eero 1 req/s 限流）；有 bypass 由 main.js 动态降到 300
+  batraceExtraHeaders: {}, // 本地私有：BATrace 自定义请求头（如 Eero 给的 bypass 白名单头）。默认空、不写死、不进设置界面
   // 是否在检测到对局后自动查询所有玩家
   autoQueryCurrentMatch: true,
   // 真实输入统计（全局鼠标+键盘钩子，默认关闭，反作弊风险自担）
@@ -34,14 +35,11 @@ const DEFAULTS = {
   // 最爱单位统计使用的最新对局数
   favUnitMatchCount: 5,
   // 对局录像：每 5 秒截一帧游戏画面合成 1fps WebM，结束后直接 S3 预签名上传（默认关闭）
-  // 对象存储配置写死在 src/replayConfig.js（REPLAY_STORAGE），设置界面不暴露
   replayEnabled: false, // 对局录像默认关闭，用户在「对局录像」卡片右上角开启（开启时若多屏会让用户选游戏所在显示器）
   replayDisplayId: '',   // 用户选择的游戏所在显示器 display_id
 
-  replayQuality: 720,      // 480 / 720 / 1080
+  replayQuality: 1080,     // 480 / 720 / 1080（默认 1080p）
   // 云端录像存储：滚动 5GB（固定值，不暴露）：超过 rollGb 自动删最旧；warnGb=接近上限提醒
-  replayRollGb: 5,
-  replayWarnGb: 4,
 
   // 缓存时长（毫秒）
   cacheTtl: {

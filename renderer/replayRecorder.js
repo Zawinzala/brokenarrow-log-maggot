@@ -13,7 +13,7 @@
   let finalMap = cfg ? (cfg.map || '') : '';
   const video = document.getElementById('v');
   let started = false;
-  const SAMPLE_MS = 2000;   // 采样间隔：每 2 秒抓一帧
+  const SAMPLE_MS = 1000;   // 采样间隔：每 1 秒抓一帧（1 秒 1 帧）
   const SAMPLE_SEC = SAMPLE_MS / 1000;
 
   function fail(msg) {
@@ -64,8 +64,8 @@
       try { ctx.drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height); frameCount++; } catch (e) {}
       const mime = (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported('video/webm;codecs=vp8')) ? 'video/webm;codecs=vp8' : 'video/webm';
       const cstream = canvas.captureStream(1);
-      // 码率提高：1fps 下 5Mbps 让每个真实帧有充足预算，画质不再糊
-      mr = new MediaRecorder(cstream, { mimeType: mime, videoBitsPerSecond: 5000000 });
+      // 码率：1fps 下 8Mbps，1080p 单帧清晰
+      mr = new MediaRecorder(cstream, { mimeType: mime, videoBitsPerSecond: 8000000 });
       const chunks = [];
       mr.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
       mr.onstop = async () => {
@@ -79,7 +79,7 @@
       };
       mr.start(1000);
       started = true;
-      // 每 2 秒抽一帧（游戏画面），1fps 视频每秒一帧；间隔越小越流畅、文件越大
+      // 每 1 秒抽一帧（游戏画面），1fps 视频每秒一帧
       drawTimer = setInterval(() => {
         try {
           ctx.drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);

@@ -17,7 +17,7 @@
 
 ## 下载
 
-最新版本见 **[Releases](https://github.com/Zawinzala/brokenarrow-log-maggot/releases)**，推荐下载安装版（Setup .exe）。
+最新版本见 **[Releases](https://github.com/Zawinzala/brokenarrow-log-maggot/releases)**，推荐下载普通版本即可不用下载安装版。
 
 ## 快速开始
 

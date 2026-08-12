@@ -1,5 +1,5 @@
 // ================= 本地录像管理（userData/replays/*.webm） =================
-// 云端录像上传后保留本地副本（不怕桶到期）；本模块只动本地文件，绝不碰云端。
+// 本地录像管理（userData/replays/*.webm）：本模块只动本地文件。
 const fs = require('fs');
 const path = require('path');
 const { parseReplayKey } = require('./s3Client');
@@ -84,4 +84,22 @@ function localReplayRead(dir, key) {
   } catch (e) { return { ok: false, message: String((e && e.message) || e) }; }
 }
 
-module.exports = { localReplayList, localReplayDelete, localReplayClean, localReplayRead };
+
+// 上传者身份 = 该局 tracker 记录的 localPlayerId + 名字 + 队伍 + 地图；用于本地录像文件名编码（无则返回空）
+function uploaderMetaFor(fid, tracker) {
+  const mm = tracker && tracker.data && tracker.data.matches ? tracker.data.matches[String(fid)] : null;
+  if (!mm) return { uploaderId: null, uploaderName: '', teamId: null, team: '', mapId: null, endTime: Date.now(), durationSec: 0 };
+  const localPl = mm.localPlayerId != null && mm.players ? mm.players.find((p) => String(p.id) === String(mm.localPlayerId)) : null;
+  const name = (localPl && localPl.name) || mm.localName || mm.localPersona || '';
+  return {
+    uploaderId: mm.localPlayerId != null ? String(mm.localPlayerId) : null,
+    uploaderName: name || '',
+    teamId: mm.localTeamId != null ? mm.localTeamId : null,
+    team: mm.localTeam || (mm.localSpectator ? 'Spectators' : ''),
+    mapId: mm.mapId != null ? mm.mapId : null,
+    endTime: mm.endTime || Date.now(),
+    durationSec: mm.durationSec || 0
+  };
+}
+
+module.exports = { localReplayList, localReplayDelete, localReplayClean, localReplayRead, uploaderMetaFor };

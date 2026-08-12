@@ -3,6 +3,7 @@ const { app, BrowserWindow } = require('electron');
 const path = require('path');
 app.disableHardwareAcceleration();
 try { app.setPath('userData', path.join(__dirname, '.smoke-data')); } catch (e) {}
+let winRef = null;
 
 
 // 注册桩处理器：冒烟测试不跑主应用，只验证渲染层（preload/脚本/按钮）
@@ -36,7 +37,11 @@ function registerStubIpc() {
   handle('api:health', () => ({ state: 'ok', checks: [{ path: '/api/units', label: '单位库', ok: true, ms: 80 }], at: Date.now(), okCount: 4, total: 4 }));
   handle('heartbeat:ping', () => null);
   handle('app:version', () => null);
-  handle('report:maggot', () => ({ error: 'smoke' }));
+  handle('report:maggot', async () => {
+    if (winRef) winRef.webContents.send('maggot:progress', { done: 1, total: 12, scanned: 1, of: 12 });
+    await new Promise((r) => setTimeout(r, 120));
+    return { maggotIndex: 3.5, calls: 1, name: 'Zola', stbid: '8863', trend: [], tags: [], units: [], refs: [] };
+  });
   handle('match:queryRoster', () => true);
   handle('tracker:profile', () => ({ id: '0', player: null, stats: {}, encounters: [], nameHistory: [], banned: false, banInfo: null, info: null }));
   handle('tracker:getBans', () => ({ list: [], lastSync: 0 }));
@@ -60,19 +65,15 @@ function registerStubIpc() {
   }));
   handle('tracker:listAccounts', () => ({ list: [{ id: '8863', name: 'Zola', persona: 'Zola', matchCount: 3 }] }));
   handle('tracker:deleteAccount', (e, id) => ({ ok: true, message: 'smoke deleted ' + id }));
-  handle('replay:status', () => ({ recording: { active: false, current: null }, uploader: { pending: 0, uploading: 0, lastError: null, queue: [] } }));
-  handle('replay:list', () => ({ list: [{ id: 'replays/8049993__8863__Zola__1__22__1700000000000__5a6f6c61.webm', fid: '8049993', map: 'Ignalina Powerplant', mapId: 22, uploaderId: '8863', uploaderName: 'Zola', teamId: 1, team: 'Bravo', size: 1024, createdAt: Date.now(), durationSec: 0, videoUrl: 'https://example/x.webm' }, { id: 'replays/8049993__55555__Other__0__22__1700000000000__4f74686572.webm', fid: '8049993', map: 'Ignalina Powerplant', mapId: 22, uploaderId: '55555', uploaderName: 'Other', teamId: 0, team: 'Alpha', size: 512, createdAt: Date.now() - 5000, durationSec: 0, videoUrl: 'https://example/other.webm' }], error: null }));
+  handle('replay:status', () => ({ recording: { active: false, current: null } }));
   handle('replay:localList', () => ({ list: [{ id: '8028345__8863__Zola__100__11__1700000000000__5a6f6c61.webm', fid: '8028345', map: 'Airport', mapId: 11, uploaderId: '8863', uploaderName: 'Zola', teamId: 100, size: 2048, createdAt: Date.now() - 200000, localPath: '(桩)' }, { id: '8049993__8863__Zola__1__22__1700000000000__5a6f6c61.webm', fid: '8049993', map: 'Ignalina Powerplant', mapId: 22, uploaderId: '8863', uploaderName: 'Zola', teamId: 1, size: 1024, createdAt: Date.now() - 1000, localPath: '(桩)' }] }));
   handle('replay:localDelete', () => ({ ok: true, message: '已删除本地录像' }));
   handle('replay:localClean', () => ({ ok: true, removed: 2 }));
   handle('replay:localRead', () => ({ ok: true, data: new ArrayBuffer(8), size: 8 }));
   handle('replay:openLocalFolder', () => true);
-  handle('replay:cacheRemote', () => ({ ok: true, message: '已缓存到本地' }));
-  handle('replay:confirmUpload', () => ({ ok: true, message: '已加入上传队列' }));
   handle('replay:testRecord', () => ({ ok: true, message: '开始录制' }));
   handle('replay:displays', () => ([{ id: '1', label: '主显示器 · 1920x1080', thumb: '' }, { id: '2', label: '副显示器 · 2560x1440', thumb: '' }]));
   handle('replay:setDisplay', () => ({ ok: true }));
-  handle('replay:delete', () => ({ ok: true, message: 'smoke deleted replay' }));
   handle('shell:open', () => true);
 }
 
@@ -87,6 +88,7 @@ app.whenReady().then(async () => {
       nodeIntegration: false
     }
   });
+  winRef = win;
   win.webContents.on('console-message', (e, level, message) => {
     logs.push(`[console:${level}] ${message}`);
   });
@@ -160,7 +162,7 @@ app.whenReady().then(async () => {
         out.replayCardExists = !!document.getElementById('replayCard');
         out.replayCardHidden = (document.getElementById('replayCard') || {}).classList.contains('hidden');
         out.replaySwitchCount = document.querySelectorAll('#setReplayEnabled').length;
-        out.hasReplayApi = typeof window.api.listReplays === 'function' && typeof window.api.getReplayStatus === 'function' && typeof window.api.deleteReplay === 'function';
+        out.hasReplayApi = typeof window.api.getReplayStatus === 'function' && typeof window.api.listLocalReplays === 'function';
         out.cspMediaSrc = (document.querySelector('meta[http-equiv="Content-Security-Policy"]') || {}).content || '';
         out.noPollField = !document.getElementById('setPoll');
         out.noDelayField = !document.getElementById('setDelay');
@@ -187,11 +189,11 @@ app.whenReady().then(async () => {
         out.replayPreviewHidden = (document.getElementById('replayPreviewWrap') || {}).classList.contains('hidden');
         out.replayPreviewImg = !!document.getElementById('replayPreviewImg');
         out.hasReplayPreviewApi = typeof window.api.onReplayPreview === 'function';
-        out.hasUploadProgressApi = typeof window.api.onReplayUploadProgress === 'function';
+        out.noUploadProgressApi = typeof window.api.onReplayUploadProgress !== 'function';
         out.hasAnnouncementApi = typeof window.api.onAnnouncement === 'function';
         out.announcementModalExists = !!document.getElementById('announcementModal');
         out.btnUpdateDownloadExists = !!document.getElementById('btnUpdateDownload');
-        out.hasRowProgress = !!document.querySelector('.r-progress');
+        out.noRowProgress = !document.querySelector('.r-progress');
         // 点对局档案的 📹 → 多个视角先弹选择列表，选一个再播放
         const amark = document.querySelector('.archive-row .replay-mark');
         if (amark) { amark.click(); await new Promise((r) => setTimeout(r, 400)); }
@@ -200,6 +202,16 @@ app.whenReady().then(async () => {
         const firstPick = document.querySelector('#replayPickerList .replay-pick-item');
         if (firstPick) { firstPick.click(); await new Promise((r) => setTimeout(r, 400)); }
         out.replayOpenedFromArchive = !(document.getElementById('replayModal') || {}).classList.contains('hidden');
+        // 上一局：进入视图 → 点「刷新粗查」→ 应保持在上一局视图并调用 queryRoster（prev），而非退出查当前
+        document.getElementById('btnPrevMatch').click();
+        await new Promise((r) => setTimeout(r, 500));
+        out.prevViewActive = (document.getElementById('currentCardTitle') || {}).textContent === '上一局';
+        document.getElementById('btnReQuery').click();
+        await new Promise((r) => setTimeout(r, 300));
+        out.prevRefreshKeepsView = (document.getElementById('currentCardTitle') || {}).textContent === '上一局';
+        out.prevRefreshStatus = (document.getElementById('queryStatus') || {}).textContent || '';
+        // 返回当前
+        document.getElementById('btnPrevMatch').click();
         out.replayFirstGroup = (document.querySelector('.replay-group-title') || {}).textContent || '';
         // 右键录像行 → 菜单含 打开位置/对局详情/BATrace/删除
         const lrow = document.querySelector('.replay-row[data-source="local"]');
@@ -208,26 +220,35 @@ app.whenReady().then(async () => {
           out.replayCtxLocalText = (document.getElementById('ctxMenu') || {}).textContent || '';
           document.dispatchEvent(new MouseEvent('click'));
         } else { out.replayCtxLocalText = ''; }
-        // 云端下载到本地后合并为一行：[云端][本地] 双标签 + 右键同时含本地/云端操作
-        const mrow = document.querySelector('.replay-row[data-source="both"]');
-        out.mergedRowCount = document.querySelectorAll('.replay-row[data-source="both"]').length;
-        out.mergedRowBothTags = !!(mrow && mrow.querySelector('.r-src.cloud') && mrow.querySelector('.r-src.local'));
-        if (mrow) {
-          mrow.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 40, clientY: 40 }));
-          out.replayCtxBothText = (document.getElementById('ctxMenu') || {}).textContent || '';
-          document.dispatchEvent(new MouseEvent('click'));
-        } else { out.replayCtxBothText = ''; }        out.replayCtxBothHasLocalDelete = out.replayCtxBothText.indexOf('删除本地副本') >= 0;
-        out.replayCtxBothHasCloudDelete = out.replayCtxBothText.indexOf('删除云端录像') >= 0;
+        // 本地 only：无 [云端] 徽标、无云端右键项
         out.archiveReplayMark = (document.querySelector('.archive-row .replay-mark') || {}).textContent || '';
         out.localBadge = !!document.querySelector('.r-src.local');
-        out.cloudBadge = !!document.querySelector('.r-src.cloud');
+        out.noCloudBadge = !document.querySelector('.r-src.cloud');
+        out.mergedRowCount = document.querySelectorAll('.replay-row[data-source="both"]').length;
+        out.noBothSourceRows = !document.querySelector('.replay-row[data-source="both"]');
         out.replayModalExists = !!document.getElementById('replayModal') && !!document.getElementById('replayVideo') && !!document.querySelector('.replay-speed-btn');
         out.themeSwatchCount = document.querySelectorAll('.theme-swatch').length;
         out.openLocalReplayBtn = !!document.getElementById('btnOpenLocalReplay');
-        out.hasRoomToolApi = typeof window.api.onRoomToolUsers === 'function' && typeof window.api.cacheRemoteReplay === 'function';
-        out.replayConfirmModal = !!document.getElementById('replayConfirmModal') && !!document.getElementById('btnReplayConfirmUpload') && !!document.getElementById('btnReplayConfirmLater');
-        out.hasConfirmApi = typeof window.api.confirmUpload === 'function' && typeof window.api.onConfirmUpload === 'function';
+        out.hasRoomToolApi = typeof window.api.onRoomToolUsers === 'function';
+        out.noReplayConfirmModal = !document.getElementById('replayConfirmModal') && !document.getElementById('btnReplayConfirmUpload');
+        out.noConfirmApi = typeof window.api.confirmUpload !== 'function' && typeof window.api.onConfirmUpload !== 'function';
         out.hasTestRecord = !!document.getElementById('btnTestRecord') && typeof window.api.testRecord === 'function';
+        // 查蛆指数：点击后按钮禁用 + 进度行可见 → 完成恢复 + 进度行隐藏
+        lastReport = { id: '8863', name: 'Zola' }; // app.js 全局变量，模拟已选玩家
+        const maggotBtn = document.getElementById('btnMaggot');
+        maggotBtn.click();
+        await new Promise((r) => setTimeout(r, 60));
+        out.maggotBusy = maggotBtn.disabled === true;
+        out.maggotProgressVisible = !(document.getElementById('maggotProgressRow') || {}).classList.contains('hidden');
+        out.maggotProgressText = (document.getElementById('maggotProgressText') || {}).textContent || '';
+        out.maggotProgressBarW = (document.getElementById('maggotProgressBar') || {}).style.width || '';
+        out.maggotProgressPct = (document.getElementById('maggotProgressPct') || {}).textContent || '';
+        out.maggotOtherBtnsBusy = document.getElementById('btnMaggotFromReport') && document.getElementById('btnMaggotFromReport').disabled === true;
+        await new Promise((r) => setTimeout(r, 400));
+        out.maggotDone = maggotBtn.disabled === false;
+        out.maggotProgressHiddenAfter = (document.getElementById('maggotProgressRow') || {}).classList.contains('hidden');
+        // 顶栏心跳无「经代理」文案
+        out.noProxyTextInHeartbeat = !((document.getElementById('onlineText') || {}).title || '').includes('经代理');
         out.displayPicker = !!document.getElementById('displayPickerModal') && !!document.getElementById('displayThumbs') && typeof window.api.listDisplays === 'function';
       }
       return out;

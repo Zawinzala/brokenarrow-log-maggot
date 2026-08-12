@@ -65,6 +65,7 @@ class BatraceClient {
     this.cache = opts.cache || null; // Cache 实例
     this.usage = opts.usage || null; // ApiUsage 实例（24h 配额）
     this.onUsage = typeof opts.onUsage === 'function' ? opts.onUsage : null; // 每次真实请求后的回调（用于实时刷新用量）
+    this.extraHeaders = (opts.extraHeaders && typeof opts.extraHeaders === 'object') ? opts.extraHeaders : {}; // 自定义请求头（本地私有，如 bypass 白名单头）
     this._queue = Promise.resolve();
   }
 
@@ -93,7 +94,7 @@ class BatraceClient {
     for (let i = 0; i <= retries; i++) {
       try {
         const res = await fetch(this.base + p, {
-          headers: { 'User-Agent': UA, Accept: 'application/json' },
+          headers: Object.assign({ 'User-Agent': UA, Accept: 'application/json' }, this.extraHeaders),
           signal: AbortSignal.timeout(15000)
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);

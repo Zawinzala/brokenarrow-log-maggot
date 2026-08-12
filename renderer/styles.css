@@ -382,6 +382,12 @@ main { padding: 20px; display: flex; flex-direction: column; gap: 16px; max-widt
   background: var(--maggot-badge-bg);
   border: 1px solid var(--maggot-badge-line); color: var(--maggot-badge-text);
 }
+/* 查蛆指数进度条（按钮行正下方一行） */
+.maggot-progress { display: flex; align-items: center; gap: 10px; margin: 6px 0 4px; font-size: 12px; }
+.maggot-progress.hidden { display: none; }
+.maggot-progress-track { flex: 1 1 auto; max-width: 260px; height: 8px; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; background: rgba(255,255,255,.06); }
+.maggot-progress-track i { display: block; height: 100%; width: 0%; background: var(--accent); border-radius: 999px; transition: width .2s; }
+.maggot-progress em { font-style: normal; min-width: 34px; text-align: left; }
 .kv { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; margin-bottom: 12px; }
 .kv .item { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; font-size: 12px; }
 .kv .item b { display: block; font-size: 15px; color: var(--text); }
