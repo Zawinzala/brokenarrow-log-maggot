@@ -32,3 +32,6 @@ AGENTS.md
 
 # 本地管理站（版本发布/心跳统计，仅本机使用，不提交）
 admin/
+
+# 云端 Worker 代码（心跳服务/版本发布，仅本地部署粘贴到 Cloudflare，不提交）
+server/
