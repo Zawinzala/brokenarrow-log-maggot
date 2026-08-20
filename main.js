@@ -20,7 +20,7 @@ const { PlayerTracker, winnerTeamFromMatch } = require('./src/tracker');
 const { zipCreate, zipExtract } = require('./src/zip');
 const { ReplayRecorder } = require('./src/replayRecorder');
 const { encodeReplayKey } = require('./src/s3Client');
-const { localReplayList, localReplayDelete, localReplayClean, localReplayRead, uploaderMetaFor } = require('./src/replayLocal');
+const { localReplayList, localReplayDelete, localReplayClean, localReplayRead, uploaderMetaFor, enrichReplayMaps } = require('./src/replayLocal');
 const { patchWebmDuration } = require('./src/webmPatch');
 
 // 压制 Windows 图形捕获（WGC）启动采集时的 E_INVALIDARG 噪声日志（录制功能正常，该错误为 Chromium 良性误报）
@@ -107,6 +107,7 @@ app.whenReady().then(() => {
   archive = new MatchArchive(path.join(app.getPath('userData'), 'match-archive.json'));
   tracker = new PlayerTracker(path.join(app.getPath('userData'), 'players-db.json'));
   tracker.setMultiAccountBond(!!config.get().multiAccountBond);
+  tracker.detectRestarts(); // 历史数据补标"已重开"局
   apm = new ApmTracker();
   focusWatcher = new FocusWatcher();
   inputHook.onEvent(() => {
@@ -280,7 +281,8 @@ function onParserEvent(type, data) {
           replayLog('matchStart: 断线重连同一局，继续录制（不重启）');
         } else {
         replayLog('matchStart: 尝试开始录制 fid=' + (data.fid || 'null') + ' map=' + (data.map || ''));
-        replayRecorder.start({ fid: data.fid, map: data.map, quality: config.get().replayQuality, displayId: config.get().replayDisplayId || '' }).then((r) => {
+        const rc = config.get();
+        replayRecorder.start({ fid: data.fid, map: data.map, quality: rc.replayQuality, fps: rc.replayFps, bitrateMbps: rc.replayBitrateMbps, audio: rc.replayAudio, displayId: rc.replayDisplayId || '' }).then((r) => {
           if (!r.ok) { console.error('[replay] 启动录制失败: ' + (r.message || '')); replayLog('start fail: ' + (r.message || '')); }
           else replayLog('start ok, source=' + (replayRecorder.current ? replayRecorder.current.sourceId : '?'));
         }).catch((e) => { replayLog('start throw: ' + String((e && e.message) || e)); });
@@ -307,6 +309,7 @@ function onParserEvent(type, data) {
     }
     archive.add(data);
     tracker.recordLogMatch({ ...data, localName: parser.snapshot().localName, accountKey: parser.snapshot().accountKey });
+    tracker.detectRestarts(); // 新局记录后重扫重开局
     send('archive:changed', archive.list().slice(0, 20));
     if (replayRecorder && replayRecorder.status().active) {
       replayLog('matchEnd: 停止录制 fid=' + (data.fid || 'null'));
@@ -610,7 +613,8 @@ function matchSummary() {
       localScores: m.localScores || null,
       localPersona: m.localPersona || null,
       localName: (localPl && localPl.name) || null,
-      playerCount: m.players ? m.players.length : 0
+      playerCount: m.players ? m.players.length : 0,
+      restarted: !!m.restarted
     });
   }
   out.sort((a, b) => (b.endTime || 0) - (a.endTime || 0));
@@ -640,6 +644,8 @@ function matchDetail(fid) {
     localName: (localPl && localPl.name) || null,
     custom: m.custom,
     mode: m.mode || null,
+    restarted: !!m.restarted,
+    detailTriedAt: m.detailTriedAt || 0,
     players: (m.players || []).map((p) => ({ id: p.id, name: p.name, team: p.team, teamId: p.teamId, oldRating: p.oldRating, newRating: p.newRating, destructionScore: p.destructionScore != null ? p.destructionScore : null, lossesScore: p.lossesScore != null ? p.lossesScore : null, objectivesCaptured: p.objectivesCaptured != null ? p.objectivesCaptured : null, killed: p.killed != null ? p.killed : null, damageDealt: p.damageDealt != null ? p.damageDealt : null, damageReceived: p.damageReceived != null ? p.damageReceived : null, dlRatio: p.dlRatio != null ? p.dlRatio : null, supplyPoints: p.supplyPoints != null ? p.supplyPoints : null, exp: p.exp != null ? p.exp : null, medals: p.medals != null ? p.medals : null }))
   };
 }
@@ -649,7 +655,7 @@ async function backfillPendingWinners() {
   if (!client || !tracker) return;
   const pending = [];
   for (const m of Object.values(tracker.data.matches)) {
-    if (m.localWon == null && m.fid && /^\d+$/.test(m.fid)) pending.push(m);
+    if (m.localWon == null && m.fid && /^\d+$/.test(m.fid) && !m.restarted) pending.push(m); // 重开局局不补（无数据属正常）
   }
   pending.sort((a, b) => (b.endTime || b.firstSeenAt || 0) - (a.endTime || a.firstSeenAt || 0));
   let changed = 0;
@@ -832,7 +838,10 @@ async function checkVersion() {
 }
 
 // ---------------- 对局录像辅助 ----------------
-function localReplaysDir() { return path.join(app.getPath('userData'), 'replays'); }
+function localReplaysDir() {
+  const dir = String(config.get().replaySaveDir || '').trim();
+  return dir ? path.resolve(dir) : path.join(app.getPath('userData'), 'replays');
+}
 function replayWatchdog() {
   if (!replayRecorder || !replayRecorder.status().active) return;
   const cur = parser ? parser.snapshot().current : null;
@@ -939,10 +948,17 @@ function registerIpc() {
   ipcMain.handle('tracker:matchDetail', async (e, fid) => {
     if (!tracker || !client) return null;
     let local = matchDetail(fid);
+    // 重开局局：BATrace 通常无数据，属正常，不再反复拉取
+    if (local && local.restarted) return { ...local, fetched: false, restart: true };
+    // 非重开局缺数据局：24 小时内已尝试过就不再重复同步（避免每次打开都拉取、白耗配额）
+    if (local && (local.detailTriedAt || 0) && Date.now() - local.detailTriedAt < 24 * 3600 * 1000) {
+      return { ...local, fetched: false, cooled: true };
+    }
     // 旧档案缺新字段（mode/队伍/ELO/评分/名单）时也自动拉取补齐
     const need = !local || local.mode == null || local.localTeamId == null || local.localScores == null || !local.players.length || (local.mode === 'ranked' && local.localEloDelta == null);
     if (!need) return { ...local, fetched: false };
     try {
+      tracker.markDetailTried(fid, Date.now()); // 每次实际拉取都记时间（成功/失败都算）
       const mres = await client.matchById(fid).catch(() => null);
       const mi = mres && mres.matchInfo ? mres.matchInfo : null;
       if (mi) tracker.fillMatchFromMatchInfo(fid, mi);
@@ -1026,7 +1042,7 @@ function registerIpc() {
         const err = (payload && payload.error) || '无录制数据';
         replayLog('save fail: ' + err);
         const hint = '常见原因：游戏以「管理员身份」运行而本工具不是（WGC 抓不到高权限窗口）。请以管理员身份运行本工具再试。';
-        try { if (Notification.isSupported()) new Notification({ title: '对局录像', body: '采集失败：' + err + '\n' + hint }).show(); } catch (e3) {}
+        try { if (Notification.isSupported()) new Notification({ title: '行车记录仪', body: '采集失败：' + err + '\n' + hint }).show(); } catch (e3) {}
         send('replay:recording', { active: false, error: err + '。' + hint });
         return { ok: false, message: err + '。' + hint };
       }
@@ -1053,22 +1069,35 @@ function registerIpc() {
       }
       fs.writeFileSync(path.join(dir, filename), webmBuf);
       send('replay:changed', null);
-      replayLog('save: 已保存 ' + filename + ' (' + webmBuf.length + 'B)');
-      try { if (Notification.isSupported()) new Notification({ title: '对局录像', body: '本局录像已保存到本地' }).show(); } catch (e3) {}
+      replayLog('save: 已保存 ' + filename + ' (' + webmBuf.length + 'B' + (payload.hasAudio ? ', 含声音' : ', 纯画面') + ')');
+      try { if (Notification.isSupported()) new Notification({ title: '行车记录仪', body: '本局录像已保存到本地' }).show(); } catch (e3) {}
       return { ok: true, message: '已保存到本地' };
     } catch (err) {
       return { ok: false, message: String((err && err.message) || err) };
     }
   });
   ipcMain.on('replay:recorder:progress', (e, p) => { if (p && p.fid) send('replay:progress', p); });
-  ipcMain.on('replay:recorder:preview', (e, dataUrl) => { if (dataUrl && typeof dataUrl === 'string') send('replay:preview', { dataUrl, at: Date.now() }); });
+  ipcMain.on('replay:recorder:preview', (e, p) => { if (p && typeof p === 'object' && p.dataUrl && typeof p.dataUrl === 'string') send('replay:preview', { dataUrl: p.dataUrl, at: Date.now(), hasAudio: !!p.hasAudio }); });
   ipcMain.handle('replay:status', () => replayStatusPayload());
   // 本地录像（只存本地；清理只动本地）
-  ipcMain.handle('replay:localList', () => ({ list: localReplayList(localReplaysDir(), mapName) }));
+  ipcMain.handle('replay:localList', () => ({ list: enrichReplayMaps(localReplayList(localReplaysDir(), mapName), tracker, archive, mapName) }));
   ipcMain.handle('replay:localDelete', (e, key) => localReplayDelete(localReplaysDir(), key));
   ipcMain.handle('replay:localClean', (e, days) => ({ ok: true, removed: localReplayClean(localReplaysDir(), Number(days) || 0) }));
   ipcMain.handle('replay:localRead', (e, key) => localReplayRead(localReplaysDir(), key));
-  ipcMain.handle('replay:openLocalFolder', () => { shell.openPath(localReplaysDir()); return true; });
+  ipcMain.handle('replay:openLocalFolder', () => {
+    const dir = localReplaysDir();
+    try { fs.mkdirSync(dir, { recursive: true }); } catch (e) {}
+    shell.openPath(dir);
+    return true;
+  });
+  ipcMain.handle('replay:dirInfo', () => {
+    const dir = localReplaysDir();
+    let count = 0;
+    try {
+      if (fs.existsSync(dir)) count = fs.readdirSync(dir).filter((f) => f.toLowerCase().endsWith('.webm')).length;
+    } catch (e) {}
+    return { ok: true, dir, count };
+  });
   // 把本地已有录像加入上传队列（用户稍后补传）
   // 列出所有显示器（带缩略图），供用户选择游戏所在屏
   ipcMain.handle('replay:displays', async () => {
@@ -1083,6 +1112,47 @@ function registerIpc() {
   });
   ipcMain.handle('replay:setDisplay', (e, id) => { config.set({ replayDisplayId: String(id || '') }); return { ok: true }; });
 
+  // 录像设置：保存目录选择/设置/迁移 + 单屏缩略图（弹窗打开期间每 2s 刷新）
+  ipcMain.handle('replay:selectSaveDir', async () => {
+    try {
+      const r = await dialog.showOpenDialog({ title: '选择录像保存目录', properties: ['openDirectory', 'createDirectory'] });
+      if (r.canceled || !r.filePaths || !r.filePaths[0]) return { ok: false, canceled: true };
+      return { ok: true, dir: r.filePaths[0] };
+    } catch (e) { return { ok: false, message: String((e && e.message) || e) }; }
+  });
+  ipcMain.handle('replay:setSaveDir', (e, dir) => {
+    const d = String(dir || '').trim();
+    config.set({ replaySaveDir: d });
+    return { ok: true, dir: localReplaysDir() };
+  });
+  ipcMain.handle('replay:moveReplays', (e, payload) => {
+    const from = String((payload && payload.from) || '');
+    const to = String((payload && payload.to) || '');
+    if (!from || !to || from === to) return { ok: true, moved: 0, failed: 0 };
+    let moved = 0, failed = 0;
+    try {
+      fs.mkdirSync(to, { recursive: true });
+      for (const f of fs.readdirSync(from)) {
+        if (!f.toLowerCase().endsWith('.webm')) continue;
+        try { fs.renameSync(path.join(from, f), path.join(to, f)); moved++; }
+        catch (e) {
+          try { fs.copyFileSync(path.join(from, f), path.join(to, f)); fs.unlinkSync(path.join(from, f)); moved++; } catch (e2) { failed++; }
+        }
+      }
+    } catch (e) { return { ok: false, message: String((e && e.message) || e) }; }
+    return { ok: true, moved, failed };
+  });
+  ipcMain.handle('replay:screenThumbnail', async (e, displayId) => {
+    try {
+      const sources = await require('electron').desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 640, height: 360 } });
+      const hit = sources.find((s) => String(s.id) === String(displayId))
+        || (displayId ? sources.find((s) => s.display_id != null && String(s.display_id) === String(displayId)) : null)
+        || sources[0] || null;
+      if (!hit || !hit.thumbnail || hit.thumbnail.isEmpty()) return { ok: false };
+      return { ok: true, thumb: hit.thumbnail.toDataURL(), id: hit.id };
+    } catch (e) { return { ok: false, message: String((e && e.message) || e) }; }
+  });
+
   // 录制测试：录 60 秒，只存本地（排查桌面采集用）
   ipcMain.handle('replay:testRecord', async () => {
     if (!replayRecorder) return { ok: false, message: '未初始化' };
@@ -1095,7 +1165,8 @@ function registerIpc() {
     const r5 = () => '-' + String(Math.floor(10000 + Math.random() * 90000)); // 负数 5 位随机（真实ID为正数，负数绝不可能误上传）
     const tFid = r5();
     const tUid = r5();
-    const r = await replayRecorder.start({ fid: tFid, map: '录制测试', quality: 720, testMode: true, testUploaderId: tUid, displayId: config.get().replayDisplayId || '' });
+    const rc = config.get();
+    const r = await replayRecorder.start({ fid: tFid, map: '录制测试', quality: rc.replayQuality, fps: rc.replayFps, bitrateMbps: rc.replayBitrateMbps, audio: rc.replayAudio, testMode: true, testUploaderId: tUid, displayId: rc.replayDisplayId || '' });
     replayLog('testRecord: fid=' + tFid + ' uploaderId=' + tUid);
     if (!r.ok) return { ok: false, message: replayRecorder.lastError || '启动失败' };
     testRecordTimer = setTimeout(() => { testRecordTimer = null; replayLog('testRecord: 60 秒到，停止'); replayRecorder.stop(); }, 60000);

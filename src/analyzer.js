@@ -9,12 +9,33 @@ const path = require('path');
 const MAP_NAMES = { 3: 'Baltiisk', 4: 'Coast', 6: 'River', 7: 'Dam', 9: 'Airport', 10: 'Frontiers', 11: 'Central Village', 12: 'Oil refinery', 13: 'Suwalki', 16: 'Klaipeda', 17: 'Ruda', 20: 'Parnu', 21: 'Chernyakhovsk', 22: 'Ignalina Powerplant' };
 function registerMapNames(mapPerformance) {
   if (!Array.isArray(mapPerformance)) return;
+  let added = false;
   for (const m of mapPerformance) {
-    if (m && m.mapId != null && m.mapName) MAP_NAMES[m.mapId] = m.mapName;
+    if (m && m.mapId != null && m.mapName && MAP_NAMES[m.mapId] !== m.mapName) {
+      MAP_NAMES[m.mapId] = m.mapName;
+      added = true;
+    }
   }
+  if (added) _mapNameIndex = null; // 新地图名注册后重建反查索引
 }
 function mapName(id) {
   return MAP_NAMES[id] || `地图#${id}`;
+}
+
+// 地图名 → 地图ID（MAP_NAMES 反查，用于本地录像文件名编码；注册新名时重建索引）
+let _mapNameIndex = null;
+function mapIdFromName(name) {
+  if (name == null) return null;
+  const n = String(name).trim().toLowerCase();
+  if (!n) return null;
+  if (!_mapNameIndex) {
+    _mapNameIndex = {};
+    for (const id of Object.keys(MAP_NAMES)) {
+      const nm = String(MAP_NAMES[id] || '').toLowerCase();
+      if (nm) _mapNameIndex[nm] = Number(id);
+    }
+  }
+  return _mapNameIndex[n] != null ? _mapNameIndex[n] : null;
 }
 
 // 蛆指数等级（与网站 DICT.zh.levels 一致）
@@ -290,4 +311,4 @@ class Analyzer {
   }
 }
 
-module.exports = { Analyzer, mapName, registerMapNames, MAP_NAMES, MAGGOT_LEVELS };
+module.exports = { Analyzer, mapName, mapIdFromName, registerMapNames, MAP_NAMES, MAGGOT_LEVELS };

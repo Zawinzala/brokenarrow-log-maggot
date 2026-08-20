@@ -21,6 +21,8 @@ const DEFAULTS = {
   heartbeatEnabled: true,
   // 界面主题：dark / light / cyan / orange
   theme: 'dark',
+  // 界面语言：zh / en / ja / ru（核心界面四语）
+  lang: 'zh',
   // 封禁监控：每小时检查封禁名单并提醒新增
   banPollEnabled: true,
   // 每小时同步本机最近对局（用于玩家追踪回填）
@@ -34,12 +36,15 @@ const DEFAULTS = {
   reportMatchPages: 4,
   // 最爱单位统计使用的最新对局数
   favUnitMatchCount: 5,
-  // 对局录像：每 5 秒截一帧游戏画面合成 1fps WebM，结束后直接 S3 预签名上传（默认关闭）
-  replayEnabled: false, // 对局录像默认关闭，用户在「对局录像」卡片右上角开启（开启时若多屏会让用户选游戏所在显示器）
+  // 对局录像：屏幕截屏合成 WebM 本地保存（默认关闭）
+  replayEnabled: false, // 行车记录仪默认关闭，用户在「行车记录仪」卡片右上角开启（开启时若多屏会让用户选游戏所在显示器）
   replayDisplayId: '',   // 用户选择的游戏所在显示器 display_id
 
-  replayQuality: 1080,     // 480 / 720 / 1080（默认 1080p）
-  // 云端录像存储：滚动 5GB（固定值，不暴露）：超过 rollGb 自动删最旧；warnGb=接近上限提醒
+  replayQuality: 720,     // 分辨率：240 / 360 / 480 / 720 / 1080（默认 720p；录像设置滑块可改）
+  replayFps: 30,          // 帧数：30～60（默认 30）
+  replayBitrateMbps: 5,   // 画质码率（Mbps）：3～10 整数（默认 5）
+  replayAudio: 'default',  // 录音：'off' 关闭 / 'default' 系统默认声卡（桌面音频回环）
+  replaySaveDir: '',       // 录像保存目录（空=默认 %APPDATA%/broken-arrow-log-assistant/replays）
 
   // 缓存时长（毫秒）
   cacheTtl: {
@@ -57,6 +62,21 @@ const COMMON_STEAM_ROOTS = [
   'E:\\Steam',
   'F:\\Steam'
 ];
+
+// 录像参数归一化：分辨率只认主流档位；帧数夹到 30～60；码率夹到 3～10（旧设置自动收敛）
+const REPLAY_QUALITIES = [240, 360, 480, 720, 1080];
+function normReplayQuality(q) {
+  const n = Number(q);
+  return REPLAY_QUALITIES.includes(n) ? n : 720;
+}
+function normReplayFps(f) {
+  const n = Number(f);
+  return Number.isFinite(n) ? Math.min(60, Math.max(30, Math.round(n))) : 30;
+}
+function normReplayBitrate(b) {
+  const n = Number(b);
+  return Number.isFinite(n) ? Math.min(10, Math.max(3, Math.round(n))) : 5;
+}
 
 // 从 steam 库配置文件中读取所有库路径
 function readSteamLibraryPaths(steamRoot) {
@@ -110,6 +130,12 @@ class Config {
         const raw = JSON.parse(fs.readFileSync(this.file, 'utf8'));
         this.data = { ...DEFAULTS, ...raw, cacheTtl: { ...DEFAULTS.cacheTtl, ...(raw.cacheTtl || {}) } };
         this.data.apiDailyLimit = DEFAULTS.apiDailyLimit; // 24h 配额为固定值，不随旧配置残留
+        // 录像参数归一化：非法值回落默认（防旧配置/手改损坏）
+        this.data.replayQuality = normReplayQuality(this.data.replayQuality);
+        this.data.replayFps = normReplayFps(this.data.replayFps);
+        this.data.replayBitrateMbps = normReplayBitrate(this.data.replayBitrateMbps);
+        this.data.replayAudio = (this.data.replayAudio === 'off' || this.data.replayAudio === 'default') ? this.data.replayAudio : 'default';
+        this.data.replaySaveDir = typeof this.data.replaySaveDir === 'string' ? this.data.replaySaveDir : '';
       }
     } catch (e) {
       // 配置损坏时回退默认值
@@ -137,7 +163,11 @@ class Config {
     this.data.apiDelayMs = DEFAULTS.apiDelayMs;
     this.data.heartbeatUrl = DEFAULTS.heartbeatUrl;
     this.data.heartbeatEnabled = true;
-    this.data.replayQuality = DEFAULTS.replayQuality;
+    this.data.replayQuality = normReplayQuality(this.data.replayQuality);
+    this.data.replayFps = normReplayFps(this.data.replayFps);
+    this.data.replayBitrateMbps = normReplayBitrate(this.data.replayBitrateMbps);
+    this.data.replayAudio = (this.data.replayAudio === 'off' || this.data.replayAudio === 'default') ? this.data.replayAudio : 'default';
+    this.data.replaySaveDir = typeof this.data.replaySaveDir === 'string' ? this.data.replaySaveDir : '';
     this.save();
     return this.get();
   }

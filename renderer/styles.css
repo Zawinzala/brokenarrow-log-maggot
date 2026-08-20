@@ -218,6 +218,9 @@ body {
 .dot.on { background: var(--good); box-shadow: 0 0 8px var(--good); }
 .dot.off { background: var(--dot-off); }
 .actions { display: flex; gap: 8px; }
+.lang-switch { display: flex; gap: 4px; }
+.lang-btn { font-size: 12px; padding: 3px 8px; line-height: 1; border-radius: 999px; opacity: .75; }
+.lang-btn.active { opacity: 1; color: var(--btn-accent-text, #fff); background: var(--accent, #4ade80); border-color: var(--accent, #4ade80); }
 
 /* ===== 按钮 ===== */
 button {
@@ -407,9 +410,10 @@ table.matches tbody tr:hover { background: var(--row-hover); }
 .note { font-size: 11.5px; }
 
 /* ===== 档案 + 关于 ===== */
-.split { display: grid; grid-template-columns: 1.2fr 1fr; gap: 16px; align-items: start; }
+.split { display: grid; grid-template-columns: 1.2fr 1fr; gap: 16px; align-items: stretch; }
+.split > .card { display: flex; flex-direction: column; min-height: 0; max-height: 560px; }
 @media (max-width: 1100px) { .split { grid-template-columns: 1fr; } }
-.archive-list { display: flex; flex-direction: column; gap: 6px; font-size: 12px; max-height: 340px; overflow-y: auto; }
+.archive-list { display: flex; flex-direction: column; gap: 6px; font-size: 12px; flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 /* 对局详情专业表格 */
 .md-table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 12px; margin-top: 6px; }
 .md-table th { text-align: left; color: var(--dim); font-weight: 600; padding: 4px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
@@ -625,12 +629,13 @@ table.matches tbody tr:hover { background: var(--row-hover); }
 /* 调查/对局详情弹窗在封禁提醒等其它弹窗之上 */
 #matchModal { z-index: 60; }
 #investigateModal, #banAlertModal { z-index: 70; } /* 调查/封禁弹窗置于对局详情之上 */
+#confirmModal { z-index: 120; } /* 确认弹窗（如录像迁移）置于所有业务弹窗之上 */
 /* ===== 对局录像 ===== */
 .replay-note { font-size: 12px; margin: 6px 0 10px; }
 .replay-preview { margin: 8px 0; padding: 8px; border: 1px solid var(--line); border-radius: 10px; background: var(--card2, rgba(255,255,255,.03)); }
 .replay-preview-head { display: flex; align-items: center; gap: 8px; font-size: 12px; margin-bottom: 6px; }
 .replay-preview img { display: block; width: 100%; max-height: 180px; object-fit: contain; border-radius: 8px; background: #000; border: 1px solid var(--line); }
-.replay-list { display: flex; flex-direction: column; gap: 10px; font-size: 12px; max-height: 420px; overflow-y: auto; }
+.replay-list { display: flex; flex-direction: column; gap: 10px; font-size: 12px; flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 .replay-group-title { color: var(--accent); font-weight: 700; font-size: 13px; display: flex; align-items: center; gap: 8px; margin: 4px 0 2px; }
 .replay-group-title .dim { font-weight: 400; }
 .replay-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--card2); }
@@ -823,3 +828,17 @@ table.matches tbody tr:hover { background: var(--row-hover); }
 .display-thumb:hover { border-color: var(--accent); }
 .display-thumb img { width: 100%; display: block; aspect-ratio: 16/9; object-fit: cover; background: #000; }
 .display-thumb .dim { padding: 6px 8px; font-size: 11.5px; }
+
+
+/* ===== 录像设置弹窗 ===== */
+.rec-settings-body { display: flex; flex-direction: column; gap: 10px; padding-top: 6px; }
+.rec-field { display: flex; flex-direction: column; gap: 4px; }
+.rec-label { font-size: 12px; color: var(--text, #cfd6e4); font-weight: 600; display: flex; gap: 6px; align-items: center; }
+.rec-select { background: var(--card2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font-size: 13px; min-width: 220px; }
+.rec-est { font-size: 13px; font-weight: 700; color: var(--accent, #4ade80); }
+.rec-hint { font-size: 11px; margin-top: 2px; }
+.rec-dir { font-size: 12px; word-break: break-all; flex: 1; }
+.rec-range { width: 100%; accent-color: var(--accent, #4ade80); cursor: pointer; }
+.rec-val { font-weight: 700; color: var(--accent, #4ade80); }
+.replay-list-wrap { margin-top: 4px; display: flex; flex-direction: column; gap: 8px; flex: 1 1 auto; min-height: 0; }
+.replay-list-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; }

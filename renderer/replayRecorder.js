@@ -1,20 +1,27 @@
-// 录制窗口逻辑：抓桌面流 → 每 5 秒抽一帧画到 canvas → captureStream(1) + MediaRecorder 产出 1fps WebM
-// 主进程发 stop 后把 Blob 转 ArrayBuffer 交回主进程落盘并入上传队列
+// 录制窗口逻辑：抓桌面流（视频 + 可选系统声音）→ 按设定帧率抽帧画到 canvas → captureStream(fps) + MediaRecorder 产出 WebM
+// 画布尺寸用 rec.computeCanvasSize（单一来源，来自 src/replayRecorder.js），绝不硬编码分辨率；
+// 主进程发 stop 后把 Blob 转 ArrayBuffer 交回主进程落盘
 (async () => {
   const rec = window.rec;
-  const cfg = rec.getConfig();
+  const cfg = rec.getConfig() || {};
   let stream = null;
   let mr = null;
   let drawTimer = null;
   let previewTimer = null;
   let frameCount = 0;
   let discarded = false;
-  let finalFid = cfg ? (cfg.fid || '') : '';
-  let finalMap = cfg ? (cfg.map || '') : '';
+  let finalFid = cfg.fid || '';
+  let finalMap = cfg.map || '';
   const video = document.getElementById('v');
   let started = false;
-  const SAMPLE_MS = 1000;   // 采样间隔：每 1 秒抓一帧（1 秒 1 帧）
-  const SAMPLE_SEC = SAMPLE_MS / 1000;
+
+  // 参数归一化（与 config.js / src/replayRecorder.js 一致）
+  const q = [240, 360, 480, 720, 1080].includes(Number(cfg.quality)) ? Number(cfg.quality) : 720;
+  const fps = Math.min(60, Math.max(30, Math.round(Number(cfg.fps) || 30)));
+  const bitrateMbps = Math.min(10, Math.max(3, Math.round(Number(cfg.bitrateMbps) || 5)));
+  const audioMode = cfg.audio === 'off' ? 'off' : 'default';
+  const SAMPLE_MS = Math.max(1, Math.round(1000 / fps)); // 采样间隔：30fps→33ms、60fps→17ms
+  const VIDEO_BPS = bitrateMbps * 1000000;
 
   function fail(msg) {
     try { rec.save({ ok: false, error: String(msg) }); } catch (e) {}
@@ -39,33 +46,45 @@
   async function start() {
     try {
       if (!cfg || !cfg.sourceId) { fail('no source'); return; }
-      stream = await navigator.mediaDevices.getUserMedia({
-        audio: false,
-        video: { mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: cfg.sourceId } }
-      });
+      const videoConstraint = { mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: cfg.sourceId } };
+      // 声音：'default' 时请求桌面音频回环（系统默认声卡输出）；失败自动降级纯视频
+      let gotAudio = false;
+      if (audioMode === 'default') {
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: { mandatory: { chromeMediaSource: 'desktop' } },
+            video: videoConstraint
+          });
+          gotAudio = stream.getAudioTracks().length > 0;
+        } catch (e) {
+          try { if (stream) stream.getTracks().forEach((t) => t.stop()); } catch (e2) {}
+          stream = null;
+        }
+      }
+      if (!stream) {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: videoConstraint });
+      }
       video.srcObject = stream;
       await video.play();
-      const q = cfg.quality === 1080 ? 1080 : cfg.quality === 480 ? 480 : 720;
       const vw = video.videoWidth || 1280;
       const vh = video.videoHeight || 720;
-      // 裁剪：抓屏后只保留游戏窗口区域（隐私）；无裁剪则整屏
-      const crop = cfg.crop || null;
-      const sx = crop ? Math.max(0, Number(crop.x) || 0) : 0;
-      const sy = crop ? Math.max(0, Number(crop.y) || 0) : 0;
-      const sw = crop ? Math.max(1, Math.min(Number(crop.width) || vw, vw - sx)) : vw;
-      const sh = crop ? Math.max(1, Math.min(Number(crop.height) || vh, vh - sy)) : vh;
-      const targetH = q;
-      const s = targetH / sh;
+      // 画布尺寸单一来源：由传入 quality 计算（无硬编码分辨率）
+      const size = rec.computeCanvasSize
+        ? rec.computeCanvasSize(q, vw, vh, cfg.crop || null)
+        : { width: Math.round(vw * q / vh), height: q, sx: 0, sy: 0, sw: vw, sh: vh };
       const canvas = document.createElement('canvas');
-      canvas.width = Math.round(sw * s);
-      canvas.height = targetH;
+      canvas.width = size.width;
+      canvas.height = size.height;
       const ctx = canvas.getContext('2d');
-      // 立即画第一帧，避免视频开头黑屏
-      try { ctx.drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height); frameCount++; } catch (e) {}
+      try { ctx.drawImage(video, size.sx, size.sy, size.sw, size.sh, 0, 0, canvas.width, canvas.height); frameCount++; } catch (e) {}
       const mime = (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported('video/webm;codecs=vp8')) ? 'video/webm;codecs=vp8' : 'video/webm';
-      const cstream = canvas.captureStream(1);
-      // 码率：1fps 下 8Mbps，1080p 单帧清晰
-      mr = new MediaRecorder(cstream, { mimeType: mime, videoBitsPerSecond: 8000000 });
+      const cstream = canvas.captureStream(fps);
+      // 关键修复：captureStream 只含视频轨道，必须把采集到的系统声音轨道接进去，否则 MediaRecorder 永远无声
+      let hasAudio = false;
+      if (gotAudio && stream.getAudioTracks().length) {
+        try { cstream.addTrack(stream.getAudioTracks()[0]); hasAudio = cstream.getAudioTracks().length > 0; } catch (e) {}
+      }
+      mr = new MediaRecorder(cstream, { mimeType: mime, videoBitsPerSecond: VIDEO_BPS, audioBitsPerSecond: 128000 });
       const chunks = [];
       mr.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
       mr.onstop = async () => {
@@ -74,24 +93,24 @@
         const blob = new Blob(chunks, { type: mime });
         const buf = await blob.arrayBuffer();
         try {
-          await rec.save({ ok: true, fid: finalFid, map: finalMap, mime, data: buf, frames: frameCount, durationSec: Math.round(frameCount * SAMPLE_SEC), testMode: !!(cfg && cfg.testMode), uploaderId: (cfg && cfg.testUploaderId) || '' });
+          await rec.save({ ok: true, fid: finalFid, map: finalMap, mime, data: buf, frames: frameCount, durationSec: Math.round(frameCount / fps), hasAudio, testMode: !!(cfg.testMode), uploaderId: (cfg && cfg.testUploaderId) || '' });
         } catch (e) { fail('save fail ' + String(e)); }
       };
       mr.start(1000);
       started = true;
-      // 每 1 秒抽一帧（游戏画面），1fps 视频每秒一帧
+      // 按设定帧率抽帧（30fps → 33ms、60fps → 17ms）
       drawTimer = setInterval(() => {
         try {
-          ctx.drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(video, size.sx, size.sy, size.sw, size.sh, 0, 0, canvas.width, canvas.height);
           frameCount++;
-          rec.progress({ fid: cfg.fid, seconds: frameCount * SAMPLE_SEC, frames: frameCount });
+          rec.progress({ fid: cfg.fid, seconds: frameCount / fps, frames: frameCount });
         } catch (e) {}
       }, SAMPLE_MS);
 
-      // 录制预览：每秒把当前画面缩略图发给主界面（对局录像模块内置小预览，确认录的是哪块屏）
+      // 录制预览：每秒把当前画面缩略图发给主界面（附声音状态，确认录的是哪块屏、有无声音）
       const pvMaxW = 320, pvMaxH = 180;
       const pvCanvas = document.createElement('canvas');
-      const pctx = pvCanvas.getContext('2d');
       previewTimer = setInterval(() => {
         try {
           if (!stream || !video || !video.videoWidth) return;
@@ -99,8 +118,9 @@
           const sc = Math.min(pvMaxW / vw3, pvMaxH / vh3);
           pvCanvas.width = Math.max(1, Math.round(vw3 * sc));
           pvCanvas.height = Math.max(1, Math.round(vh3 * sc));
+          const pctx = pvCanvas.getContext('2d');
           pctx.drawImage(video, 0, 0, pvCanvas.width, pvCanvas.height);
-          rec.preview(pvCanvas.toDataURL('image/jpeg', 0.5));
+          rec.preview({ dataUrl: pvCanvas.toDataURL('image/jpeg', 0.5), hasAudio });
         } catch (e) {}
       }, 1000);
 

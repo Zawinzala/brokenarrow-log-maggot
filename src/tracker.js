@@ -70,7 +70,7 @@ class PlayerTracker {
             winnerTeam: null, localWon: e.won != null ? !!e.won : null,
             localTeam: e.myTeam || null, custom: null,
             mode: null, localTeamId: null, localSpectator: false, localEloDelta: null, localEloAfter: null, localScores: null,
-            players: [], source: 'log', firstSeenAt: e.at || null, syncedAt: null
+            players: [], source: 'log', firstSeenAt: e.at || null, syncedAt: null, restarted: false, detailTriedAt: 0
           };
           matches[fid] = m;
         } else {
@@ -299,7 +299,7 @@ class PlayerTracker {
         winnerTeam: null, localWon: null, localTeam, custom: null,
         mode: null, localTeamId, localSpectator, localEloDelta: null, localEloAfter: null, localScores: null,
         localPlayerId: me && me.id != null ? String(me.id) : null, localPersona: persona || null,
-        players: [], source: 'log', firstSeenAt: at, syncedAt: null
+        players: [], source: 'log', firstSeenAt: at, syncedAt: null, restarted: false, detailTriedAt: 0
       };
       this.data.matches[fid] = rec;
     } else {
@@ -405,7 +405,7 @@ class PlayerTracker {
         winnerTeam: null, localWon: null, localTeam: null, custom: null,
         mode: null, localTeamId: null, localSpectator: false, localEloDelta: null, localEloAfter: null, localScores: null,
         localPlayerId: me && me.Id != null ? String(me.Id) : null, localPersona: null,
-        players: [], source: 'api', firstSeenAt: at, syncedAt: null
+        players: [], source: 'api', firstSeenAt: at, syncedAt: null, restarted: false, detailTriedAt: 0
       };
       if (me && me.Id != null && rec.localPlayerId == null) rec.localPlayerId = String(me.Id);
       rec.mapId = mapId != null ? mapId : rec.mapId;
@@ -578,7 +578,7 @@ class PlayerTracker {
         winnerTeam: null, localWon: null, localTeam: null, custom: null,
         mode: null, localTeamId: null, localSpectator: false, localEloDelta: null, localEloAfter: null, localScores: null,
         localPlayerId: null, localPersona: null,
-        players: [], source: 'api', firstSeenAt: Date.now(), syncedAt: null
+        players: [], source: 'api', firstSeenAt: Date.now(), syncedAt: null, restarted: false, detailTriedAt: 0
       };
       this.data.matches[fid] = rec;
     }
@@ -754,6 +754,31 @@ class PlayerTracker {
     this.data.lastBanSync = at;
     this._flush();
     return newly;
+  }
+  // 重开局识别：只用本局数据——时长极短（≤5 分钟）、没有任何结果/评分（被打断/重开）、且从未被 API 收录。
+  // 这类局 BATrace 通常无数据；标记后详情不再反复向 API 拉取。不依赖"下一局"是否存在。
+  detectRestarts() {
+    let changed = 0;
+    for (const m of Object.values(this.data.matches || {})) {
+      if (!m || !m.fid || m.restarted) continue;
+      const dur = m.durationSec != null ? Number(m.durationSec) : null;
+      if (dur == null || dur > 300) continue; // 时长未知或超过 5 分钟不算
+      if (m.winnerTeam != null || m.localWon != null || m.localEloDelta != null) continue; // 有结果不算
+      if (m.mode != null || m.localScores != null) continue; // 被 API 收录 = 真实完成的局，不算
+      m.restarted = true;
+      changed++;
+    }
+    if (changed) this._flush();
+    return changed;
+  }
+
+  // 记录某局详情最近一次尝试向 API 拉取的时间（成功/失败都记），避免每次打开都重复同步
+  markDetailTried(fid, at) {
+    if (fid == null) return;
+    const rec = this.data.matches[String(fid)];
+    if (!rec) return;
+    rec.detailTriedAt = at || Date.now();
+    this._flush();
   }
 }
 

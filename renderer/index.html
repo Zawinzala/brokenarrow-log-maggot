@@ -3,114 +3,120 @@
 <head>
   <meta charset="UTF-8" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:; media-src 'self' blob: data:; connect-src 'self'" />
-  <title>断箭蛆工具 byZola</title>
+  <title data-i18n="app.title">断箭蛆工具 byZola</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
   <header id="topbar">
     <div class="brand">
       <span class="logo">🐛</span>
-      <span class="brand-name">断箭蛆工具<em> byZola</em></span>
+      <span class="brand-name"><span data-i18n="app.brand">断箭蛆工具</span><em> byZola</em></span>
       <span id="ver" class="ver"></span>
     </div>
     <div class="status" id="statusBar">
       <span id="listenDot" class="dot off"></span>
-      <span id="statusText">未监听</span>
+      <span id="statusText" data-i18n="status.notListening">未监听</span>
       <span id="fileText" class="dim"></span>
-      <span id="budgetText" class="dim" title="本机 24 小时内实际请求 BATrace 的次数（缓存命中不计）"></span>
-      <span id="apiHealth" class="api-health" title="BATrace API 稳定性检测中…">BATrace ●</span>
-      <span id="onlineText" class="online" title="统计服务返回的当前在线用户数（可在设置里关闭）">● 0 人正在使用</span>
+      <span id="budgetText" class="dim" data-i18n-title="budget.title"></span>
+      <span id="apiHealth" class="api-health" data-i18n-title="api.checking">BATrace ●</span>
+      <span id="onlineText" class="online" data-i18n-title="status.onlineTitle">● 0 人正在使用</span>
     </div>
     <div class="actions">
-      <button id="btnGame" class="btn btn-ghost" title="防空小游戏（开发者娱乐）">🎮 小游戏</button>
-      <button id="btnSettings" class="btn btn-primary">⚙ 设置</button>
+      <div class="lang-switch">
+        <button id="langEn" class="btn btn-ghost lang-btn" title="English">EN</button>
+        <button id="langZh" class="btn btn-ghost lang-btn" title="中文">中文</button>
+        <button id="langJa" class="btn btn-ghost lang-btn" title="日本語">日本語</button>
+        <button id="langRu" class="btn btn-ghost lang-btn" title="Русский">РУС</button>
+      </div>
+      <button id="btnGame" class="btn btn-ghost" data-i18n="header.game" data-i18n-title="header.gameTitle">🎮 小游戏</button>
+      <button id="btnSettings" class="btn btn-primary" data-i18n="header.settings">⚙ 设置</button>
     </div>
   </header>
 
   <main>
     <div id="updateBanner" class="update-banner hidden">
       <span id="updateText"></span>
-      <button id="btnUpdateDownload" class="btn btn-ghost light">⬇ 下载新版本</button>
+      <button id="btnUpdateDownload" class="btn btn-ghost light" data-i18n="common.downloadNew">⬇ 下载新版本</button>
       <button id="btnUpdateClose" class="btn btn-ghost light">✕</button>
     </div>
 
     <!-- 当前房间 / 当前对局粗查 -->
     <section class="card" id="currentCard">
       <div class="card-head">
-        <h2>📍 <span id="currentCardTitle">当前房间 / 当前对局</span></h2>
-        <span id="matchMeta" class="dim">等待日志…</span>
+        <h2>📍 <span id="currentCardTitle" data-i18n="card.current">当前房间 / 当前对局</span></h2>
+        <span id="matchMeta" class="dim" data-i18n="match.waitingLog">等待日志…</span>
       </div>
       <div id="matchInfo" class="match-info"></div>
       <div id="teamGrid" class="team-grid"></div>
       <div class="query-row">
         <div id="queryStatus" class="query-status dim"></div>
-        <button id="btnPrevMatch" class="btn btn-ghost" title="查看上一局对局的玩家名单">🕘 上一局</button>
-        <button id="btnReQuery" class="btn btn-ghost" title="手动重新触发当前对局/房间粗查">🔄 刷新粗查</button>
+        <button id="btnPrevMatch" class="btn btn-ghost" data-i18n="btn.prevMatch" data-i18n-title="btn.prevMatchTitle">🕘 上一局</button>
+        <button id="btnReQuery" class="btn btn-ghost" data-i18n="btn.requery" data-i18n-title="btn.requeryTitle">🔄 刷新粗查</button>
       </div>
-      <div class="delay-note dim">⚠️ 粗查结果来自 BATrace 历史数据，存在数天延迟，并非实时对战数据。</div>
+      <div class="delay-note dim" data-i18n="common.delayNote">⚠️ 粗查结果来自 BATrace 历史数据，存在数天延迟，并非实时对战数据。</div>
     </section>
 
     <!-- APM 统计（默认收起，设置里开启后展开） -->
     <section class="card hidden" id="apmCard">
       <div class="card-head">
-        <h2>⚡ APM 统计（真实鼠标 + 键盘）</h2>
+        <h2 data-i18n="card.apm">⚡ APM 统计（真实鼠标 + 键盘）</h2>
         <div class="head-right">
-          <span id="apmMeta" class="dim">等待对局…</span>
-          <button id="btnApmToggle" class="btn btn-ghost card-toggle" title="展开 / 收起">▾</button>
+          <span id="apmMeta" class="dim" data-i18n="apm.waiting">等待对局…</span>
+          <button id="btnApmToggle" class="btn btn-ghost card-toggle" data-i18n-title="apm.toggle">▾</button>
         </div>
       </div>
       <div id="apmBody" class="apm-body">
-        <div class="apm-empty dim">对局开始后自动统计：仅记录游戏窗口在前台时的鼠标点击与键盘按键（全局只读钩子，不模拟、不拦截任何输入）。默认关闭，需在「设置」中开启「APM 监测功能」。对局结束自动生成每分钟操作图。</div>
+        <div class="apm-empty dim" data-i18n="apm.idleHint">对局开始后自动统计：仅记录游戏窗口在前台时的鼠标点击与键盘按键（全局只读钩子，不模拟、不拦截任何输入）。默认关闭，需在「设置」中开启「APM 监测功能」。对局结束自动生成每分钟操作图。</div>
       </div>
     </section>
 
     <!-- 卡组工具：两列同栏 -->
     <section class="card">
       <div class="card-head">
-        <h2>🃏 卡组工具（断箭的卡组）</h2>
+        <h2 data-i18n="card.deck">🃏 卡组工具（断箭的卡组）</h2>
         <div class="head-right">
           <span id="deckPaths" class="dim"></span>
-          <button id="btnDeckRefresh" class="btn btn-ghost">↻ 刷新</button>
+          <button id="btnDeckRefresh" class="btn btn-ghost" data-i18n="common.refresh">↻ 刷新</button>
         </div>
       </div>
       <div id="deckSyncAlert" class="sync-alert hidden">
         <div class="sync-alert-text">
-          <b>⚠️ 检测到切换账号</b>
-          <span class="dim">是否替换成换号前（ID：<b id="syncFrom"></b>）的上一局的卡组包？（同名卡组将被覆盖；原包仍在后勤仓库 <b>上一局卡组包.zip</b>）</span>
+          <b data-i18n="sync.title">⚠️ 检测到切换账号</b>
+          <span class="dim"><span data-i18n="sync.bodyPre">是否替换成换号前（ID：</span><b id="syncFrom"></b><span data-i18n="sync.bodyMid">）的上一局的卡组包？（同名卡组将被覆盖；原包仍在后勤仓库 </span><b>上一局卡组包.zip</b><span data-i18n="sync.bodyEnd">）</span></span>
           <span id="syncAccountInfo" class="dim"></span>
         </div>
         <div class="sync-alert-actions">
-          <button id="btnSyncRestore" class="btn btn-primary">⬇ 替换成上一局卡组包</button>
-          <button id="btnSyncIgnore" class="btn btn-ghost">忽略（保留当前）</button>
+          <button id="btnSyncRestore" class="btn btn-primary" data-i18n="deck.syncRestore">⬇ 替换成上一局卡组包</button>
+          <button id="btnSyncIgnore" class="btn btn-ghost" data-i18n="deck.syncIgnore">忽略（保留当前）</button>
           <button id="btnSyncDismiss" class="btn btn-ghost">✕</button>
         </div>
       </div>
       <div class="deck-grid">
         <div class="deck-col">
-          <h3>前线卡组 <span class="dim">(.dek)</span></h3>
+          <h3><span data-i18n="deck.front">前线卡组</span> <span class="dim">(.dek)</span></h3>
           <select id="deckFront" multiple size="10"></select>
           <div class="deck-actions">
-            <button id="btnDeckBackup" class="btn btn-primary">⬆ 备份选中</button>
-            <button id="btnDeckBackupAll" class="btn btn-primary">⬆ 备份全部</button>
-            <button id="btnOpenFront" class="btn btn-ghost">📂 打开目录</button>
-            <button id="btnDeckDelFront" class="btn btn-danger">🗑 删除所选</button>
+            <button id="btnDeckBackup" class="btn btn-primary" data-i18n="deck.backupSel">⬆ 备份选中</button>
+            <button id="btnDeckBackupAll" class="btn btn-primary" data-i18n="deck.backupAll">⬆ 备份全部</button>
+            <button id="btnOpenFront" class="btn btn-ghost" data-i18n="common.openDir">📂 打开目录</button>
+            <button id="btnDeckDelFront" class="btn btn-danger" data-i18n="deck.deleteSel">🗑 删除所选</button>
           </div>
         </div>
         <div class="deck-col">
-          <h3>后勤仓库 <span class="dim">(.zip)</span></h3>
+          <h3><span data-i18n="deck.back">后勤仓库</span> <span class="dim">(.zip)</span></h3>
           <select id="deckBack" multiple size="10"></select>
           <div class="deck-actions">
-            <button id="btnDeckDeploy" class="btn btn-primary">⬇ 部署到前线</button>
-            <button id="btnOpenBack" class="btn btn-ghost">📂 打开目录</button>
-            <button id="btnDeckDelBack" class="btn btn-danger">🗑 删除所选</button>
+            <button id="btnDeckDeploy" class="btn btn-primary" data-i18n="deck.deploy">⬇ 部署到前线</button>
+            <button id="btnOpenBack" class="btn btn-ghost" data-i18n="common.openDir">📂 打开目录</button>
+            <button id="btnDeckDelBack" class="btn btn-danger" data-i18n="deck.deleteSel">🗑 删除所选</button>
           </div>
         </div>
       </div>
       <div id="backupRow" class="backup-row hidden">
-        <span class="dim">备份包名称（默认带时间戳）</span>
+        <span class="dim" data-i18n="deck.backupName">备份包名称（默认带时间戳）</span>
         <input id="backupName" type="text" placeholder="Backup-20260804_120000" />
-        <button id="btnBackupOk" class="btn btn-primary">确认备份</button>
-        <button id="btnBackupCancel" class="btn btn-ghost">取消</button>
+        <button id="btnBackupOk" class="btn btn-primary" data-i18n="deck.confirmBackup">确认备份</button>
+        <button id="btnBackupCancel" class="btn btn-ghost" data-i18n="common.cancel">取消</button>
       </div>
       <div id="deckMsg" class="deck-msg dim"></div>
     </section>
@@ -118,20 +124,20 @@
     <!-- 玩家查询：搜索 → 粗查预览 → 蛆指数 -->
     <section class="card">
       <div class="card-head">
-        <h2>🔍 玩家查蛆指数</h2>
+        <h2 data-i18n="card.maggot">🔍 玩家查蛆指数</h2>
         <span id="maggotCalls" class="dim"></span>
       </div>
       <div class="search-row">
-        <input id="searchInput" type="text" placeholder="输入玩家名或 ID，回车搜索" />
-        <button id="btnSearch" class="btn">搜索</button>
-        <button id="btnMaggot" class="btn btn-accent">🐛 查蛆指数</button>
+        <input id="searchInput" type="text" data-i18n-placeholder="search.ph" placeholder="输入玩家名或 ID，回车搜索" />
+        <button id="btnSearch" class="btn" data-i18n="btn.search">搜索</button>
+        <button id="btnMaggot" class="btn btn-accent" data-i18n="btn.maggot">🐛 查蛆指数</button>
       </div>
       <div id="maggotProgressRow" class="maggot-progress hidden">
         <span id="maggotProgressText" class="dim"></span>
         <span class="maggot-progress-track"><i id="maggotProgressBar"></i></span>
         <em id="maggotProgressPct" class="dim"></em>
       </div>
-      <div class="hint dim">搜索 → 点结果看粗查预览（1 次调用，数据有数天延迟）→ 点「查蛆指数」看蛆指数（冷查约 13 次调用，24 小时缓存后仅 1 次）。</div>
+      <div class="hint dim" data-i18n="maggot.hint">搜索 → 点结果看粗查预览（1 次调用，数据有数天延迟）→ 点「查蛆指数」看蛆指数（冷查约 13 次调用，24 小时缓存后仅 1 次）。</div>
       <div id="searchResults" class="search-results"></div>
       <div id="reportArea"></div>
       <div id="maggotArea"></div>
@@ -140,70 +146,76 @@
     <!-- 封禁追踪 -->
     <section class="card hidden" id="banCard">
       <div class="card-head">
-        <h2>🛡 封禁追踪</h2>
+        <h2 data-i18n="card.ban">🛡 封禁追踪</h2>
         <div class="head-right">
           <span id="banSyncInfo" class="dim"></span>
-          <button id="btnBanCheaters" class="btn btn-ghost" title="只显示之前遇到过、现已封禁的玩家及其对局">🔍 我遇到过的作弊者</button>
+          <button id="btnBanCheaters" class="btn btn-ghost" data-i18n="btn.banCheaters" data-i18n-title="btn.banCheatersTitle">🔍 我遇到过的作弊者</button>
         </div>
       </div>
       <div id="banList" class="ban-list"></div>
     </section>
 
-    <!-- 对局录像（屏幕截屏合成 WebM 本地保存；卡片常驻，开关只控制自动录制） -->
-    <section class="card" id="replayCard">
-      <div class="card-head">
-        <h2>📹 对局录像——本地保存</h2>
-        <div class="head-right">
-          <span id="replayStatus" class="dim"></span>
-          <span class="dim" style="font-size:12px">自动录制</span>
-          <label class="switch"><input id="setReplayEnabled" type="checkbox" checked /><span class="slider"></span></label>
-          <button id="btnReplayRefresh" class="btn btn-ghost">↻ 刷新列表</button>
-        </div>
-      </div>
-      <div id="replayPreviewWrap" class="replay-preview hidden">
-        <div class="replay-preview-head">
-          <span id="replayPreviewLabel" class="dim">🔴 正在录制</span>
-          <span class="dim" style="margin-left:auto;font-size:11px">每秒刷新 · 录制时显示</span>
-        </div>
-        <img id="replayPreviewImg" alt="录制预览" />
-      </div>
-      <div class="search-row">
-        <input id="replaySearch" type="text" placeholder="按对局 ID 搜索（留空显示最近录像）" />
-        <button id="btnReplaySearch" class="btn">查询</button>
-      </div>
-      <div class="replay-note dim">每 1 秒截一帧游戏画面合成 1080p WebM（8000kbps），开启「自动录制」后每局自动录到本地；有录像的对局会在「对局档案」里标 📹。</div>
-      <div id="replayStorageWarn" class="replay-warn hidden"></div>
-      <div id="replayList" class="replay-list"></div>
-    </section>
-
-    <!-- 对局档案 + 关于（同栏两列） -->
+    <!-- 对局档案 + 行车记录仪（两栏布局） -->
     <div class="split">
       <section class="card">
         <div class="card-head">
-          <h2>🗂 对局档案</h2>
+          <h2 data-i18n="card.archive">🗂 对局档案</h2>
         </div>
         <div id="archiveList" class="archive-list"></div>
       </section>
 
-      <section class="card" id="aboutCard">
+      <!-- 行车记录仪（屏幕截屏合成 WebM 本地保存；卡片常驻，开关只控制自动录制；列表按时间倒序管理） -->
+      <section class="card" id="replayCard">
         <div class="card-head">
-          <h2>ℹ️ 关于</h2>
-          <span id="aboutVer" class="dim"></span>
+          <h2 data-i18n="card.replay">🚗 行车记录仪</h2>
+          <div class="head-right">
+            <span id="replayStatus" class="dim"></span>
+            <span class="dim" style="font-size:12px" data-i18n="replay.auto">自动录制</span>
+            <label class="switch"><input id="setReplayEnabled" type="checkbox" checked /><span class="slider"></span></label>
+            <button id="btnRecSettings" class="btn btn-ghost" data-i18n="replay.settings" data-i18n-title="replay.settingsTitle">⚙ 录像设置</button>
+          </div>
         </div>
-        <div class="about-body">
-          <p><b>软件原理</b>：本工具只读取游戏官方公开的日志文件（GameLogs）与查询网站的公开接口，不读写游戏内存、不注入进程、不修改游戏文件，不影响反作弊，仅作赛后复盘参考。</p>
-          <p><b>数据致谢</b>：玩家数据由 <a id="linkBatrace" href="#" class="link">BATrace 查询站</a> 提供；蛆指数算法与 <a id="linkMaggotSite" href="#" class="link">断箭蛆指数网站</a> 保持同步。</p>
-          <div id="updateInfo" class="update-info"></div>
+        <div id="replayPreviewWrap" class="replay-preview hidden">
+          <div class="replay-preview-head">
+            <span id="replayPreviewLabel" class="dim" data-i18n="replay.recording">🔴 正在录制</span>
+            <span id="replayPreviewAudio" class="dim"></span>
+            <span class="dim" style="margin-left:auto;font-size:11px" data-i18n="replay.previewHint">每秒刷新 · 录制时显示</span>
+          </div>
+          <img id="replayPreviewImg" data-i18n-alt="replay.previewAlt" alt="录制预览" />
+        </div>
+        <div class="replay-note dim" id="replayNote"></div>
+        <div id="replayStorageWarn" class="replay-warn hidden"></div>
+        <div class="replay-list-wrap">
+          <div class="replay-list-head">
+            <span id="replayListInfo" class="dim"></span>
+            <span style="flex:1"></span>
+            <button type="button" id="btnReplayOpenFolder" class="btn btn-ghost" data-i18n="replay.openFolder">📂 打开位置</button>
+            <button type="button" id="btnReplayClean30" class="btn btn-ghost" data-i18n="replay.clean30">删除 30 天前</button>
+          </div>
+          <div id="replayList" class="replay-list"></div>
         </div>
       </section>
     </div>
+
+    <!-- 关于（整宽单栏，置于最下方） -->
+    <section class="card" id="aboutCard">
+      <div class="card-head">
+        <h2 data-i18n="card.about">ℹ️ 关于</h2>
+        <span id="aboutVer" class="dim"></span>
+      </div>
+      <div class="about-body">
+        <p><b data-i18n="about.principlesTitle">软件原理</b><span data-i18n="about.principlesBody">：本工具只读取游戏官方公开的日志文件（GameLogs）与查询网站的公开接口，不读写游戏内存、不注入进程、不修改游戏文件，不影响反作弊，仅作赛后复盘参考。</span></p>
+        <p><b data-i18n="about.creditsTitle">数据致谢</b><span data-i18n="about.creditsPre">：玩家数据由 </span><a id="linkBatrace" href="#" class="link" data-i18n="about.linkBatrace">BATrace 查询站</a><span data-i18n="about.creditsMid"> 提供；蛆指数算法与 </span><a id="linkMaggotSite" href="#" class="link" data-i18n="about.linkMaggotSite">断箭蛆指数网站</a><span data-i18n="about.creditsPost"> 保持同步。</span></p>
+        <div id="updateInfo" class="update-info"></div>
+      </div>
+    </section>
   </main>
 
   <!-- 公告弹窗（每次启动有公告就弹一次） -->
   <div id="announcementModal" class="modal hidden">
     <div class="modal-box small">
       <div class="modal-head">
-        <span class="inv-name">📢 公告</span>
+        <span class="inv-name" data-i18n="modal.announcement">📢 公告</span>
         <button id="btnAnnouncementClose" class="btn btn-ghost" style="margin-left:auto">✕</button>
       </div>
       <div id="announcementText" style="white-space:pre-wrap;line-height:1.7;font-size:13px"></div>
@@ -212,76 +224,76 @@
   <!-- 确认弹窗 -->
   <div id="confirmModal" class="modal hidden">
     <div class="modal-box small">
-      <h3 id="confirmTitle">确认</h3>
+      <h3 id="confirmTitle" data-i18n="common.confirm">确认</h3>
       <p id="confirmText"></p>
       <div class="modal-actions">
-        <button id="btnConfirmYes" class="btn btn-primary">确定</button>
-        <button id="btnConfirmNo" class="btn btn-ghost">取消</button>
+        <button id="btnConfirmYes" class="btn btn-primary" data-i18n="common.ok">确定</button>
+        <button id="btnConfirmNo" class="btn btn-ghost" data-i18n="common.cancel">取消</button>
       </div>
     </div>
   </div>
   <!-- 设置弹窗 -->
   <div id="settingsModal" class="modal hidden">
     <div class="modal-box">
-      <h3>⚙ 设置</h3>
-      <label>游戏日志目录（GameLogs）</label>
+      <h3 data-i18n="settings.title">⚙ 设置</h3>
+      <label data-i18n="settings.logDir">游戏日志目录（GameLogs）</label>
       <div class="search-row">
-        <input id="setLogDir" type="text" placeholder="选择断箭的 GameLogs 目录" />
-        <button id="btnBrowse" class="btn">浏览…</button>
+        <input id="setLogDir" type="text" data-i18n-placeholder="settings.logDirPh" placeholder="选择断箭的 GameLogs 目录" />
+        <button id="btnBrowse" class="btn" data-i18n="settings.browse">浏览…</button>
       </div>
       <div class="row">
-        <button id="btnDetect" class="btn btn-ghost">自动检测 Steam 目录</button>
+        <button id="btnDetect" class="btn btn-ghost" data-i18n="settings.detect">自动检测 Steam 目录</button>
         <span id="dirHint" class="dim"></span>
       </div>
-      <label class="check"><input id="setAuto" type="checkbox" /> 检测到对局后自动粗查玩家</label>
-      <label class="check"><input id="setInputHook" type="checkbox" /> APM 监测功能（全局鼠标+键盘钩子，只读不拦截；默认关闭，开启前请自行评估反作弊风险）</label>
+      <label class="check"><input id="setAuto" type="checkbox" /> <span data-i18n="settings.autoQuery">检测到对局后自动粗查玩家</span></label>
+      <label class="check"><input id="setInputHook" type="checkbox" /> <span data-i18n="settings.apm">APM 监测功能（全局鼠标+键盘钩子，只读不拦截；默认关闭，开启前请自行评估反作弊风险）</span></label>
       <div class="row">
-        <button id="btnHeartbeatTest" class="btn btn-ghost">测试心跳</button>
+        <button id="btnHeartbeatTest" class="btn btn-ghost" data-i18n="settings.testHeartbeat">测试心跳</button>
         <span id="heartbeatTest" class="dim"></span>
       </div>
-      <label>主题</label>
+      <label data-i18n="settings.theme">主题</label>
       <div class="theme-picker" id="themePicker">
-        <button type="button" class="theme-swatch" data-theme="dark" title="黑色（深色）"><i style="background:#0d1017"></i><span>黑</span></button>
-        <button type="button" class="theme-swatch" data-theme="light" title="白色（亮色）"><i style="background:#f2f4f8"></i><span>白</span></button>
-        <button type="button" class="theme-swatch" data-theme="cyan" title="青色（亮色）"><i style="background:#cffafe"></i><span>青</span></button>
-        <button type="button" class="theme-swatch" data-theme="orange" title="橙色（亮色）"><i style="background:#ffedd5"></i><span>橙</span></button>
-        <button type="button" class="theme-swatch" data-theme="violet" title="紫夜（暗色+紫罗兰）"><i style="background:#a78bfa"></i><span>紫夜</span></button>
-        <button type="button" class="theme-swatch" data-theme="forest" title="深林（暗色+松绿）"><i style="background:#34d399"></i><span>深林</span></button>
-        <button type="button" class="theme-swatch" data-theme="ocean" title="深海（暗色+天蓝）"><i style="background:#38bdf8"></i><span>深海</span></button>
+        <button type="button" class="theme-swatch" data-theme="dark" data-i18n-title="theme.darkTitle"><i style="background:#0d1017"></i><span data-i18n="theme.dark">黑</span></button>
+        <button type="button" class="theme-swatch" data-theme="light" data-i18n-title="theme.lightTitle"><i style="background:#f2f4f8"></i><span data-i18n="theme.light">白</span></button>
+        <button type="button" class="theme-swatch" data-theme="cyan" data-i18n-title="theme.cyanTitle"><i style="background:#cffafe"></i><span data-i18n="theme.cyan">青</span></button>
+        <button type="button" class="theme-swatch" data-theme="orange" data-i18n-title="theme.orangeTitle"><i style="background:#ffedd5"></i><span data-i18n="theme.orange">橙</span></button>
+        <button type="button" class="theme-swatch" data-theme="violet" data-i18n-title="theme.violetTitle"><i style="background:#a78bfa"></i><span data-i18n="theme.violet">紫夜</span></button>
+        <button type="button" class="theme-swatch" data-theme="forest" data-i18n-title="theme.forestTitle"><i style="background:#34d399"></i><span data-i18n="theme.forest">深林</span></button>
+        <button type="button" class="theme-swatch" data-theme="ocean" data-i18n-title="theme.oceanTitle"><i style="background:#38bdf8"></i><span data-i18n="theme.ocean">深海</span></button>
       </div>
-      <label class="check"><input id="setBanPoll" type="checkbox" /> 封禁监控（每小时检查封禁名单，发现新封弹窗提醒）</label>
-      <label class="check"><input id="setMatchSync" type="checkbox" /> 每小时同步我的对局记录（用于玩家追踪回填相遇/胜负/改名史）</label>
-      <label class="check"><input id="setBanCard" type="checkbox" /> 显示封禁追踪栏目（默认隐藏）</label>
-      <label class="check"><input id="setMultiBond" type="checkbox" /> 多账号联动羁绊检查（换号也视为同一人，默认开）</label>
+      <label class="check"><input id="setBanPoll" type="checkbox" /> <span data-i18n="settings.banPoll">封禁监控（每小时检查封禁名单，发现新封弹窗提醒）</span></label>
+      <label class="check"><input id="setMatchSync" type="checkbox" /> <span data-i18n="settings.matchSync">每小时同步我的对局记录（用于玩家追踪回填相遇/胜负/改名史）</span></label>
+      <label class="check"><input id="setBanCard" type="checkbox" /> <span data-i18n="settings.banCard">显示封禁追踪栏目（默认隐藏）</span></label>
+      <label class="check"><input id="setMultiBond" type="checkbox" /> <span data-i18n="settings.multiBond">多账号联动羁绊检查（换号也视为同一人，默认开）</span></label>
       <div class="replay-local-block">
-        <div class="test-title dim">📼 本地录像管理（清理只删本地录像文件）</div>
+        <div class="test-title dim" data-i18n="settings.localReplayTitle">📼 本地录像管理（清理只删本地录像文件）</div>
         <div id="localReplayInfo" class="dim"></div>
         <div class="search-row" style="flex-wrap:wrap">
-          <button type="button" id="btnLocalClean30" class="btn btn-ghost">删除 30 天前</button>
-          <button type="button" id="btnOpenLocalReplay" class="btn btn-ghost">📂 打开本地录像位置</button>
-          <button type="button" id="btnLocalCleanAll" class="btn btn-danger">删除全部本地录像</button>
+          <button type="button" id="btnLocalClean30" class="btn btn-ghost" data-i18n="replay.clean30">删除 30 天前</button>
+          <button type="button" id="btnOpenLocalReplay" class="btn btn-ghost" data-i18n="settings.localReplayOpen">📂 打开本地录像位置</button>
+          <button type="button" id="btnLocalCleanAll" class="btn btn-danger" data-i18n="settings.localReplayCleanAll">删除全部本地录像</button>
         </div>
         <div id="localReplayResult" class="dim"></div>
       </div>
       <div class="accounts-block">
-        <div class="test-title dim">👥 账号数据管理（删除会同时清理该账号的对局/相遇数据与卡组归档文件夹）</div>
+        <div class="test-title dim" data-i18n="settings.accountsTitle">👥 账号数据管理（删除会同时清理该账号的对局/相遇数据与卡组归档文件夹）</div>
         <div id="accountList" class="inv-list"></div>
       </div>
       <div class="test-block">
-        <div class="test-title dim">🧪 开发者测试（不影响正常功能）</div>
+        <div class="test-title dim" data-i18n="settings.devTitle">🧪 开发者测试（不影响正常功能）</div>
         <div class="search-row" style="flex-wrap:wrap">
-          <button type="button" id="btnTestBanNotify" class="btn btn-ghost">测试封禁提醒（遇到过）</button>
-          <button type="button" id="btnTestMatchSync" class="btn btn-ghost">立即同步我的对局</button>
-          <button type="button" id="btnTestBanSync" class="btn btn-ghost">立即检查封禁</button>
-          <button type="button" id="btnTestVersion" class="btn btn-ghost">测试版本更新推送</button>
-          <button type="button" id="btnTestRecord" class="btn btn-ghost">🎥 录制测试（1 分钟·只存本地）</button>
+          <button type="button" id="btnTestBanNotify" class="btn btn-ghost" data-i18n="settings.devBanNotify">测试封禁提醒（遇到过）</button>
+          <button type="button" id="btnTestMatchSync" class="btn btn-ghost" data-i18n="settings.devSyncNow">立即同步我的对局</button>
+          <button type="button" id="btnTestBanSync" class="btn btn-ghost" data-i18n="settings.devBanCheck">立即检查封禁</button>
+          <button type="button" id="btnTestVersion" class="btn btn-ghost" data-i18n="settings.devVersion">测试版本更新推送</button>
+          <button type="button" id="btnTestRecord" class="btn btn-ghost" data-i18n="settings.devRecord">🎥 录制测试（1 分钟·只存本地）</button>
         </div>
         <div id="bypassHint" class="dim" style="font-size:11px;color:#8b94a3;margin-top:4px"></div>
         <div id="testResult" class="dim"></div>
       </div>
       <div class="modal-actions">
-        <button id="btnSave" class="btn btn-primary">保存</button>
-        <button id="btnCancel" class="btn btn-ghost">取消</button>
+        <button id="btnSave" class="btn btn-primary" data-i18n="common.save">保存</button>
+        <button id="btnCancel" class="btn btn-ghost" data-i18n="common.cancel">取消</button>
       </div>
     </div>
   </div>
@@ -292,26 +304,26 @@
       <div class="inv-head">
         <span class="inv-name" id="invName">-</span>
         <span class="dim" id="invId"></span>
-        <span id="invBanBadge" class="inv-ban hidden">🛡 已封禁</span>
+        <span id="invBanBadge" class="inv-ban hidden" data-i18n="inv.banned">🛡 已封禁</span>
         <button id="btnInvClose" class="btn btn-ghost" style="margin-left:auto">✕</button>
       </div>
       <div id="invGameWrap" class="inv-game-wrap full hidden">
-        <div class="inv-loading-top dim">正在载入数据…</div>
+        <div class="inv-loading-top dim" data-i18n="loading.data">正在载入数据…</div>
         <canvas id="invGame" width="720" height="420"></canvas>
-        <div class="inv-game-hint dim">🛰 正在扫描该玩家的对局数据…</div>
+        <div class="inv-game-hint dim" data-i18n="scanning.player">🛰 正在扫描该玩家的对局数据…</div>
       </div>
       <div id="invContent">
         <div class="inv-stats" id="invStats"></div>
         <div class="inv-cols">
-          <div class="inv-section"><b>最近 10 局</b><div id="invRecent" class="inv-list"></div></div>
-          <div class="inv-section"><b>相遇记录</b><div id="invEncounters" class="inv-list"></div></div>
+          <div class="inv-section"><b data-i18n="inv.recent">最近 10 局</b><div id="invRecent" class="inv-list"></div></div>
+          <div class="inv-section"><b data-i18n="inv.encounters">相遇记录</b><div id="invEncounters" class="inv-list"></div></div>
         </div>
-        <div class="inv-section"><b>情报</b><div id="invInfo" class="inv-info dim"></div></div>
-        <div class="inv-section"><b>改名历史</b><div id="invNames" class="inv-list"></div></div>
+        <div class="inv-section"><b data-i18n="inv.info">情报</b><div id="invInfo" class="inv-info dim"></div></div>
+        <div class="inv-section"><b data-i18n="inv.names">改名历史</b><div id="invNames" class="inv-list"></div></div>
         <div class="inv-actions">
-          <button id="btnInvRefresh" class="btn btn-ghost">↻ 刷新情报</button>
-          <button id="btnInvMaggot" class="btn btn-accent">🐛 查蛆指数</button>
-          <button id="btnInvOpen" class="btn btn-ghost">🌐 在 BATrace 打开</button>
+          <button id="btnInvRefresh" class="btn btn-ghost" data-i18n="inv.refresh">↻ 刷新情报</button>
+          <button id="btnInvMaggot" class="btn btn-accent" data-i18n="btn.maggot">🐛 查蛆指数</button>
+          <button id="btnInvOpen" class="btn btn-ghost" data-i18n="ctx.openBatrace">🌐 在 BATrace 打开</button>
         </div>
       </div>
     </div>
@@ -321,12 +333,12 @@
   <div id="matchModal" class="modal hidden">
     <div class="modal-box wide">
       <div class="inv-head">
-        <span class="inv-name" id="matchTitle">对局详情</span>
+        <span class="inv-name" id="matchTitle" data-i18n="modal.matchDetail">对局详情</span>
         <span class="dim" id="matchFid"></span>
         <button id="btnMatchClose" class="btn btn-ghost" style="margin-left:auto">✕</button>
       </div>
       <div id="matchGameWrap" class="inv-game-wrap full hidden">
-        <div class="inv-loading-top dim">正在载入对局数据…</div>
+        <div class="inv-loading-top dim" data-i18n="loading.match">正在载入对局数据…</div>
         <canvas id="matchGame" width="720" height="420"></canvas>
       </div>
       <div id="matchDetailBody" class="inv-section"></div>
@@ -337,11 +349,76 @@
   <div id="displayPickerModal" class="modal hidden">
     <div class="modal-box">
       <div class="inv-head">
-        <span class="inv-name">🖥 选择游戏所在显示器</span>
+        <span class="inv-name" data-i18n="modal.pickDisplay">🖥 选择游戏所在显示器</span>
         <button id="btnDisplayPickClose" class="btn btn-ghost" style="margin-left:auto">✕</button>
       </div>
-      <div class="dim" style="font-size:12px;line-height:1.6;margin-bottom:8px">检测到多个显示器。请点选你打游戏的那块屏（之后对局录像固定录它）。</div>
+      <div class="dim" style="font-size:12px;line-height:1.6;margin-bottom:8px" data-i18n="modal.pickDisplayHint">检测到多个显示器。请点选你打游戏的那块屏（之后对局录像固定录它）。</div>
       <div id="displayThumbs" class="display-thumbs"></div>
+    </div>
+  </div>
+
+  <!-- 录像设置弹窗 -->
+  <div id="recSettingsModal" class="modal hidden">
+    <div class="modal-box">
+      <div class="inv-head">
+        <span class="inv-name" data-i18n="modal.recSettings">🎥 行车记录仪设置</span>
+        <button id="btnRecSettingsClose" class="btn btn-ghost" style="margin-left:auto">✕</button>
+      </div>
+      <div class="rec-settings-body">
+        <div class="rec-field">
+          <div class="rec-label" data-i18n="rec.screen">录制屏幕</div>
+          <div class="search-row">
+            <select id="recDisplay" class="rec-select"></select>
+            <button type="button" id="btnRecDisplayRefresh" class="btn btn-ghost" data-i18n-title="rec.displayRefresh">↻</button>
+          </div>
+        </div>
+        <div class="rec-field">
+          <div class="rec-label"><span data-i18n="rec.resolution">分辨率</span> <span id="recQualityVal" class="dim rec-val">720p</span></div>
+          <input type="range" id="recQualityRange" class="rec-range" min="240" max="1080" step="120" list="qualityTicks" />
+          <datalist id="qualityTicks">
+            <option value="240" label="240p"></option>
+            <option value="360" label="360p"></option>
+            <option value="480" label="480p"></option>
+            <option value="720" label="720p"></option>
+            <option value="1080" label="1080p"></option>
+          </datalist>
+        </div>
+        <div class="rec-field">
+          <div class="rec-label"><span data-i18n="rec.fps">帧数（每秒）</span> <span id="recFpsVal" class="dim rec-val">30 fps</span></div>
+          <input type="range" id="recFpsRange" class="rec-range" min="30" max="60" step="1" />
+        </div>
+        <div class="rec-field">
+          <div class="rec-label"><span data-i18n="rec.bitrate">画质码率</span> <span id="recBitrateVal" class="dim rec-val">5 Mbps</span></div>
+          <input type="range" id="recBitrateRange" class="rec-range" min="3" max="10" step="1" />
+        </div>
+        <div class="rec-field">
+          <div class="rec-label" data-i18n="rec.estSize">预计 45 分钟文件大小</div>
+          <div id="recEstSize" class="rec-est"></div>
+          <div id="recEstNote" class="dim rec-hint"></div>
+        </div>
+        <div class="rec-field">
+          <div class="rec-label" data-i18n="rec.audio">录制声音</div>
+          <select id="recAudio" class="rec-select">
+            <option value="default" data-i18n="rec.audioDefault">系统默认声卡（桌面音频）</option>
+            <option value="off" data-i18n="rec.audioOff">关闭</option>
+          </select>
+          <div class="dim rec-hint" data-i18n="rec.audioHint">Chromium 仅支持回环系统默认输出，无法指定其它声卡。</div>
+        </div>
+        <div class="rec-field">
+          <div class="rec-label" data-i18n="rec.saveDir">保存目录</div>
+          <div class="search-row">
+            <span id="recSaveDir" class="dim rec-dir"></span>
+            <button type="button" id="btnRecSaveDir" class="btn btn-ghost" data-i18n="rec.chooseDir">选择目录</button>
+            <button type="button" id="btnRecMigrate" class="btn btn-ghost" data-i18n="rec.migrate">迁移旧录像</button>
+            <button type="button" id="btnRecOpenSaveDir" class="btn btn-ghost" data-i18n="rec.open">📂 打开</button>
+          </div>
+        </div>
+        <div id="recSettingsMsg" class="dim" style="margin-top:6px;white-space:pre-wrap"></div>
+        <div class="search-row" style="margin-top:10px">
+          <button type="button" id="btnRecSettingsSave" class="btn btn-primary" data-i18n="common.save">保存</button>
+          <button type="button" id="btnRecSettingsCancel" class="btn btn-ghost" data-i18n="common.cancel">取消</button>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -349,8 +426,8 @@
   <div id="replayPickerModal" class="modal hidden">
     <div class="modal-box">
       <div class="modal-head">
-        <span class="inv-name">选择本地录像</span>
-        <span class="dim" style="font-size:12px">本地录像（可能有多个文件）</span>
+        <span class="inv-name" data-i18n="modal.pickReplay">选择本地录像</span>
+        <span class="dim" style="font-size:12px" data-i18n="modal.pickReplayHint">本地录像（可能有多个文件）</span>
         <button id="btnReplayPickerClose" class="btn btn-ghost" style="margin-left:auto">✕</button>
       </div>
       <div id="replayPickerList" class="inv-list"></div>
@@ -360,15 +437,15 @@
   <div id="replayModal" class="modal hidden">
     <div class="modal-box wide replay-video-box">
       <div class="inv-head">
-        <span class="inv-name" id="replayPlayTitle">对局录像</span>
+        <span class="inv-name" id="replayPlayTitle" data-i18n="modal.replayTitle">行车记录仪</span>
         <span class="dim" id="replayPlayMeta"></span>
         <button id="btnReplayClose" class="btn btn-ghost" style="margin-left:auto">✕</button>
       </div>
-      <div class="replay-speed dim">播放速度：
+      <div class="replay-speed dim"><span data-i18n="replay.speed">播放速度：</span>
         <button type="button" class="btn btn-ghost replay-speed-btn active" data-rate="1">1x</button>
         <button type="button" class="btn btn-ghost replay-speed-btn" data-rate="2">2x</button>
         <button type="button" class="btn btn-ghost replay-speed-btn" data-rate="3">3x</button>
-        <span class="dim">（1 秒/帧：1x = 实时，3x = 3 倍速快速复盘）</span>
+        <span class="dim" data-i18n="replay.speedHint">（1 秒/帧：1x = 实时，3x = 3 倍速快速复盘）</span>
       </div>
       <video id="replayVideo" controls autoplay playsinline style="width:100%;max-height:70vh;background:#000;border-radius:10px;border:1px solid var(--line)"></video>
     </div>
@@ -378,12 +455,12 @@
   <div id="banAlertModal" class="modal hidden">
     <div class="modal-box">
       <div class="inv-head">
-        <span class="inv-name">🛡 你遇到过的新被封玩家</span>
-        <span class="dim">（已自动入库，点击/右键可操作）</span>
+        <span class="inv-name" data-i18n="modal.banAlertTitle">🛡 你遇到过的新被封玩家</span>
+        <span class="dim" data-i18n="modal.banAlertHint">（已自动入库，点击/右键可操作）</span>
         <button id="btnBanAlertClose" class="btn btn-ghost" style="margin-left:auto">✕</button>
       </div>
       <div id="banAlertList" class="ban-list"></div>
-      <div class="dim" style="font-size:12px;margin-top:6px">右键玩家：<b>调查羁绊</b> 或 <b>在 BATrace 打开</b></div>
+      <div class="dim" style="font-size:12px;margin-top:6px" data-i18n="common.rightClickPlayerHint">右键玩家：<b>调查羁绊</b> 或 <b>在 BATrace 打开</b></div>
     </div>
   </div>
 
@@ -391,31 +468,33 @@
   <div id="gameModal" class="modal hidden">
     <div class="modal-box game-box">
       <div class="game-head">
-        <span class="inv-name">🎮 防空小游戏</span>
-        <span class="dim">按 <b>Z</b> 开关雷达 ｜ 鼠标右键移动阵地</span>
+        <span class="inv-name" data-i18n="modal.gameTitle">🎮 防空小游戏</span>
+        <span class="dim" data-i18n="modal.gameHint1">按 <b>Z</b> 开关雷达 ｜ 鼠标右键移动阵地</span>
         <button id="btnGameClose" class="btn btn-ghost" style="margin-left:auto">✕</button>
       </div>
       <div id="gameHud" class="game-hud"></div>
       <div class="game-stage">
         <canvas id="gameCanvas" width="720" height="420"></canvas>
         <div id="gameUpgrade" class="game-overlay hidden">
-          <div class="game-overlay-title">🎁 击杀 B2，选择一项升级</div>
+          <div class="game-overlay-title" data-i18n="game.killB2">🎁 击杀 B2，选择一项升级</div>
           <div id="gameUpgradeCards" class="game-upgrade-cards"></div>
         </div>
         <div id="gameOver" class="game-overlay hidden">
-          <div class="game-overlay-title">💀 防空阵地被摧毁</div>
+          <div class="game-overlay-title" data-i18n="game.destroyed">💀 防空阵地被摧毁</div>
           <div id="gameOverStats" class="game-over-stats"></div>
           <div class="game-over-actions">
-            <button id="btnGameRestart" class="btn btn-primary">🔄 再来一局</button>
-            <button id="btnGameOverClose" class="btn btn-ghost">关闭</button>
+            <button id="btnGameRestart" class="btn btn-primary" data-i18n="game.restart">🔄 再来一局</button>
+            <button id="btnGameOverClose" class="btn btn-ghost" data-i18n="common.close">关闭</button>
           </div>
         </div>
       </div>
-      <div class="game-hint dim">按 <b>Z</b> 开关雷达（开机自动防空，但会被 SEAD 锁定）｜ 鼠标<b>右键</b>移动防空阵地（移动后需按 Z 重新开机）｜ 击杀 B2 可选升级</div>
+      <div class="game-hint dim" data-i18n="game.hint2">按 <b>Z</b> 开关雷达（开机自动防空，但会被 SEAD 锁定）｜ 鼠标<b>右键</b>移动防空阵地（移动后需按 Z 重新开机）｜ 击杀 B2 可选升级</div>
     </div>
   </div>
 
   <script src="game.js"></script>
+  <script src="recSettingsCore.js"></script>
+  <script src="i18n.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

@@ -39,12 +39,41 @@ async function findCaptureSource(sources, displayId) {
   return primary;
 }
 
-// 按画质档计算画布尺寸（保持画面比例，目标高）
+// 参数归一化（非法值回落默认；与 config.js / 渲染层一致）
+const REPLAY_QUALITIES = [240, 360, 480, 720, 1080];
+function normQuality(q) {
+  const n = Number(q);
+  return REPLAY_QUALITIES.includes(n) ? n : 720;
+}
+function normFps(f) {
+  const n = Number(f);
+  return Number.isFinite(n) ? Math.min(60, Math.max(30, Math.round(n))) : 30;
+}
+function normBitrate(b) {
+  const n = Number(b);
+  return Number.isFinite(n) ? Math.min(10, Math.max(3, Math.round(n))) : 5;
+}
+function normAudio(a) {
+  return a === 'off' ? 'off' : 'default';
+}
+
+// 画布尺寸单一来源：按画质档计算画布尺寸（保持画面比例，目标高；支持裁剪区域）
+function computeCanvasSize(quality, vw, vh, crop) {
+  const targetH = normQuality(quality);
+  const W = Number(vw) || 1280;
+  const H = Number(vh) || 720;
+  const c = crop || null;
+  const sx = c ? Math.max(0, Number(c.x) || 0) : 0;
+  const sy = c ? Math.max(0, Number(c.y) || 0) : 0;
+  const sw = c ? Math.max(1, Math.min(Number(c.width) || W, W - sx)) : W;
+  const sh = c ? Math.max(1, Math.min(Number(c.height) || H, H - sy)) : H;
+  const scale = targetH / sh;
+  return { width: Math.round(sw * scale), height: targetH, sx, sy, sw, sh };
+}
+// 兼容旧导出
 function scaleForQuality(quality, vw, vh) {
-  const targetH = quality === 1080 ? 1080 : quality === 480 ? 480 : 720;
-  if (!vw || !vh) return { width: Math.round(targetH * 16 / 9), height: targetH };
-  const s = targetH / vh;
-  return { width: Math.round(vw * s), height: targetH };
+  const { width, height } = computeCanvasSize(quality, vw, vh, null);
+  return { width, height };
 }
 
 class ReplayRecorder {
@@ -63,7 +92,7 @@ class ReplayRecorder {
     return { active: this.active, current: this.current ? { fid: this.current.fid, map: this.current.map, startedAt: this.current.startedAt, sourceId: this.current.sourceId || '' } : null };
   }
 
-  async start({ fid, map, quality, testMode, testUploaderId, displayId }) {
+  async start({ fid, map, quality, fps, bitrateMbps, audio, testMode, testUploaderId, displayId }) {
     this.abort();
     const desktopCapturer = electronMod && electronMod.desktopCapturer;
     const BrowserWindow = electronMod && electronMod.BrowserWindow;
@@ -73,8 +102,11 @@ class ReplayRecorder {
       this._log('桌面源共 ' + sources.length + ' 个: ' + sources.slice(0, 12).map((x) => x.id + '=' + (x.name || '').slice(0, 30)).join(' | '));
       const src = await findCaptureSource(sources, displayId);
       if (!src) { this._log('桌面源: ' + sources.map((x) => x.id + '=' + (x.name || '')).join(' | ')); this._error('未找到游戏窗口或屏幕源'); return { ok: false, message: 'no source' }; }
-      const q = quality === 1080 ? 1080 : quality === 480 ? 480 : 720;
-      const cfgJson = JSON.stringify({ sourceId: src.id, fid: fid != null ? String(fid) : '', map: map || '', quality: q, testMode: !!testMode, testUploaderId: testUploaderId != null ? String(testUploaderId) : '' });
+      const q = normQuality(quality);
+      const f = normFps(fps);
+      const br = normBitrate(bitrateMbps);
+      const au = normAudio(audio);
+      const cfgJson = JSON.stringify({ sourceId: src.id, fid: fid != null ? String(fid) : '', map: map || '', quality: q, fps: f, bitrateMbps: br, audio: au, testMode: !!testMode, testUploaderId: testUploaderId != null ? String(testUploaderId) : '' });
       // Windows WGC 采集在「隐藏窗口」里会 Failed to start capture（E_INVALIDARG）；
       // 改为「显示但移出屏幕」（不抢焦点、不进任务栏、关后台节流），确保采集会话能启动
       const win = new BrowserWindow({
@@ -99,7 +131,7 @@ class ReplayRecorder {
       await win.loadFile(path.join(__dirname, '..', 'renderer', 'replayRecorder.html'));
       this.win = win;
       this.active = true;
-      this.current = { fid: fid != null ? String(fid) : '', map: map || '', sourceId: src.id, quality: q, startedAt: Date.now(), testMode: !!testMode, displayId: displayId || null };
+      this.current = { fid: fid != null ? String(fid) : '', map: map || '', sourceId: src.id, quality: q, fps: f, bitrateMbps: br, audio: au, startedAt: Date.now(), testMode: !!testMode, displayId: displayId || null };
       this._log('录制窗口已创建，捕获源=' + src.id);
       this._emitStatus();
       return { ok: true };
@@ -160,4 +192,4 @@ class ReplayRecorder {
   _error(msg) { this.lastError = msg; if (this.onError) { try { this.onError(msg); } catch (e) {} } }
 }
 
-module.exports = { ReplayRecorder, matchGameSource, findCaptureSource, scaleForQuality };
+module.exports = { ReplayRecorder, matchGameSource, findCaptureSource, scaleForQuality, computeCanvasSize, normQuality, normFps, normBitrate, normAudio };

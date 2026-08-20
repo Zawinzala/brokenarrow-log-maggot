@@ -8,7 +8,7 @@ function esc(s) {
 }
 function fmtDuration(sec) {
   if (sec == null) return '-';
-  return `${Math.floor(sec / 60)}分${sec % 60}秒`;
+  return I18N.t('match.durationFmt', { m: Math.floor(sec / 60), s: sec % 60 });
 }
 function fmtDelta(d) { return d == null ? '-' : (d > 0 ? '+' : '') + (Math.round(d * 100) / 100).toFixed(2); }
 function fmtElo(v) { return v == null ? '-' : (Math.round(v * 100) / 100).toFixed(2); }
@@ -28,44 +28,45 @@ function renderBudget(d) {
   if (!t) return;
   const used = d.used24h || 0;
   const limit = d.limit24h || 0;
-  let text = limit > 0 ? `API 已用 ${used} / ${limit}（24h）` : `API 已用 ${used}（不限）`;
-  if (d.skipped) text += '｜跳过 ' + d.skipped;
+  let text = limit > 0 ? I18N.t('budget.used', { used, limit }) : I18N.t('budget.unlimited', { used });
+  if (d.skipped) text += I18N.t('status.skipN', { n: d.skipped });
   if (d.finished) text += ' ✓';
   t.textContent = text;
   const exhausted = limit > 0 && used >= limit;
   t.classList.toggle('warn', exhausted);
-  t.title = exhausted ? '今日 API 配额已用尽，查询将暂停，明天 24 小时窗口自动恢复' : '';
+  t.title = exhausted ? I18N.t('status.budgetExhausted') : '';
 }
 // 顶栏：心跳统计（在线人数）
 function renderHeartbeat(h) {
   const el = $('onlineText');
   if (!el) return;
+  lastHeartbeat = h;
   if (h && h.online != null) {
     el.classList.add('ok'); el.classList.remove('err');
-    el.textContent = '● ' + h.online + ' 人正在使用';
+    el.textContent = I18N.t('status.online', { n: h.online });
     el.title = h.lastError
-      ? '上次心跳：' + h.lastError + '（自己可能没计入）'
-      : '上次心跳成功于 ' + (h.lastPing ? new Date(h.lastPing).toLocaleTimeString('zh-CN') : '-');
+      ? I18N.t('status.heartbeatLastErr', { err: h.lastError })
+      : I18N.t('status.heartbeatLastOk', { t: h.lastPing ? new Date(h.lastPing).toLocaleTimeString('zh-CN') : '-' });
   } else if (h && h.lastError) {
     el.classList.remove('ok'); el.classList.add('err');
-    el.textContent = '● 心跳连接失败';
+    el.textContent = I18N.t('heartbeat.failed');
     el.title = h.lastError;
   } else {
     el.classList.remove('ok', 'err');
-    el.textContent = '● 0 人正在使用';
-    el.title = '统计服务返回的当前在线用户数（可在设置里关闭）';
+    el.textContent = I18N.t('status.online', { n: 0 });
+    el.title = I18N.t('status.onlineTitle');
   }
 }
 // 顶栏：BATrace API 稳定性灯（绿=全通 / 黄=部分 / 红=全挂 / 灰=未检测）
 function renderApiHealth(d) {
   const el = $('apiHealth');
   if (!el) return;
-  if (!d || !d.state) { el.className = 'api-health unknown'; el.title = 'BATrace API 稳定性尚未检测（每小时自动检测一次）'; el.textContent = 'BATrace ●'; return; }
-  const map = { ok: ['ok', '🟢 API 全部可用'], partial: ['warn', '🟡 API 部分可用'], down: ['down', '🔴 API 全部不可用'] };
-  const pair = map[d.state] || ['unknown', 'API 状态未知'];
+  if (!d || !d.state) { el.className = 'api-health unknown'; el.title = I18N.t('api.checking'); el.textContent = 'BATrace ●'; return; }
+  const map = { ok: ['ok', I18N.t('api.ok')], partial: ['warn', I18N.t('api.partial')], down: ['down', I18N.t('api.down')] };
+  const pair = map[d.state] || ['unknown', I18N.t('api.unknown')];
   el.className = 'api-health ' + pair[0];
-  const detail = (d.checks || []).map((c) => (c.ok ? '✅ ' + c.label + '（' + c.ms + 'ms）' : '❌ ' + c.label + '（' + (c.status ? 'HTTP ' + c.status : '超时') + '）')).join('\n');
-  el.title = pair[1] + '（' + d.okCount + '/' + d.total + '）\n' + detail + '\n检测时间：' + (d.at ? fmtTime(d.at) : '-') + '\n每小时自动检测一次';
+  const detail = (d.checks || []).map((c) => (c.ok ? I18N.t('status.apiCheckOk', { label: c.label, ms: c.ms }) : I18N.t('status.apiCheckFail', { label: c.label, detail: c.status ? 'HTTP ' + c.status : I18N.t('status.apiTimeout') }))).join('\n');
+  el.title = pair[1] + '（' + d.okCount + '/' + d.total + '）\n' + detail + '\n' + I18N.t('status.apiCheckedAt', { t: d.at ? fmtTime(d.at) : '-' }) + '\n' + I18N.t('status.apiHourly');
   el.textContent = 'BATrace ●';
 }
 // 单选/多选增强：单击单选，Ctrl+单击多选
@@ -111,10 +112,10 @@ function copyText(text, btn, doneText) {
 // 单玩家一行情报（与油猴脚本同格式）
 function playerInfoText(p) {
   const info = p.info;
-  const elo = info && info.elo != null ? Math.round(info.elo) : '无';
-  const cat = info && info.category ? catLabel(info.category) : '暂无数据';
-  const top = info && info.topUnits ? info.topUnits : '暂无数据';
-  return `玩家 ${p.name} (ID: ${p.id}) | ELO: ${elo} | 偏好: ${cat} | 最爱: ${top}`;
+  const elo = info && info.elo != null ? Math.round(info.elo) : I18N.t('common.none');
+  const cat = info && info.category ? catLabel(info.category) : I18N.t('common.noData');
+  const top = info && info.topUnits ? info.topUnits : I18N.t('common.noData');
+  return I18N.t('report.playerLine', { name: p.name, id: p.id, elo, cat, top });
 }
 function copyPlayerRow(row, btn) { copyText(playerInfoText(row), btn, '✅'); }
 // 单队一行：名字+ELO（油猴脚本同格式）
@@ -123,7 +124,7 @@ function copyTeamRow(team, btn, rows) {
   const teamVal = team === 'alpha' ? 'Alpha' : team === 'bravo' ? 'Bravo' : null;
   const players = Object.values(src).filter((p) => teamVal ? p.team === teamVal : !p.team);
   const line = players.map((p) => {
-    const elo = p.info && p.info.elo != null ? Math.round(p.info.elo) : '无';
+    const elo = p.info && p.info.elo != null ? Math.round(p.info.elo) : I18N.t('common.none');
     return p.name + ' ' + elo;
   }).join(', ');
   copyText(line, btn, '✅');
@@ -133,7 +134,7 @@ function copyTeamRow(team, btn, rows) {
 if (!window.api) {
   const banner = document.createElement('div');
   banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:999;background:#5a1f1f;color:#ffd7d7;padding:10px 16px;font-size:13px;';
-  banner.textContent = '预加载脚本未注入（window.api 不存在），按钮将全部失效。请检查 preload.js 是否被安全软件拦截，或查看 userData/renderer.log。';
+  banner.textContent = I18N.t('status.preloadMissing');
   document.body.prepend(banner);
 }
 
@@ -174,7 +175,7 @@ function renderSession(s) {
   const cur = s.current;
   // 标题随状态切换：房间 / 对局
   const titleEl = $('currentCardTitle');
-  if (titleEl) titleEl.textContent = cur ? '当前对局' : '当前房间';
+  if (titleEl) titleEl.textContent = cur ? I18N.t('match.current') : I18N.t('match.room');
   const lobby = Object.entries(s.lobbyPlayers || {}).map(([id, name]) => ({ id, name, team: null }));
   const keep = matchRows; // 保留已查询/加载中的状态，避免会话事件把结果清成“未查询”
   matchRows = {};
@@ -186,19 +187,19 @@ function renderSession(s) {
         : { id: p.id, name: p.name, team: null, status: 'idle' };
     }
     if (lobby.length) {
-      $('matchInfo').innerHTML = `<span>状态：<b>未开战（房间内 ${lobby.length} 人）</b></span><span class="dim">已自动粗查，结果直接显示在下方</span>`;
+      $('matchInfo').innerHTML = `<span>${I18N.t('match.notStarted', { n: lobby.length })}</span><span class="dim">${I18N.t('match.autoQueried')}</span>`;
     } else {
-      $('matchInfo').innerHTML = '<span class="dim">等待对局开始（大厅中或无日志）…</span>';
+      $('matchInfo').innerHTML = '<span class="dim">' + I18N.t('match.waitingStart') + '</span>';
     }
     renderMatchGrid();
     $('queryStatus').textContent = '';
     return;
   }
   $('matchInfo').innerHTML = `
-    <span>地图：<b>${esc(cur.map || '未知')}</b></span>
-    <span>对局ID：<b>${esc(cur.fid || '-')}</b></span>
-    <span>本机玩家：<b>${esc(s.localName || '-')}</b></span>
-    <span>本局卡组：<b>${esc(cur.localDeck || '-')}</b></span>`;
+    <span>${I18N.t('match.map', { v: '<b>' + esc(cur.map || I18N.t('common.unknown')) + '</b>' })}</span>
+    <span>${I18N.t('match.fid', { v: '<b>' + esc(cur.fid || '-') + '</b>' })}</span>
+    <span>${I18N.t('match.localPlayer', { v: '<b>' + esc(s.localName || '-') + '</b>' })}</span>
+    <span>${I18N.t('match.localDeck', { v: '<b>' + esc(cur.localDeck || '-') + '</b>' })}</span>`;
   for (const p of cur.players || []) {
     const prev = keep[p.id];
     if (!matchRows[p.id]) {
@@ -210,17 +211,17 @@ function renderSession(s) {
   renderMatchGrid();
 }
 
-const CAT_LABELS = { aircrafts: '战机', helicopters: '直升机', tanks: '坦克', ifvs: '步战车', apcs: '装甲车', artillery: '火炮', airdefense: '防空', infantry: '步兵', recon: '侦察', ships: '战舰', transports: '运输', drones: '无人机', missiles: '导弹', naval: '海军', vehicles: '载具', support: '支援', planes: '战机', armor: '装甲' };
-function catLabel(key) { if (!key) return '-'; return CAT_LABELS[String(key).toLowerCase()] || String(key); }
+const CAT_LABELS = { aircrafts: 'cat.aircrafts', helicopters: 'cat.helicopters', tanks: 'cat.tanks', ifvs: 'cat.ifvs', apcs: 'cat.apcs', artillery: 'cat.artillery', airdefense: 'cat.airdefense', infantry: 'cat.infantry', recon: 'cat.recon', ships: 'cat.ships', transports: 'cat.transports', drones: 'cat.drones', missiles: 'cat.missiles', naval: 'cat.naval', vehicles: 'cat.vehicles', support: 'cat.support', planes: 'cat.planes', armor: 'cat.armor' };
+function catLabel(key) { if (!key) return '-'; const k = CAT_LABELS[String(key).toLowerCase()]; return k ? I18N.t(k) : String(key); }
 
 function playerCard(p) {
   const selfName = session.localName;
-  const selfTag = selfName && p.name === selfName ? '<span class="pself">(我)</span>' : '';
-  const toolTag = toolUserIds.has(String(p.id)) ? '<span class="ptool" title="也在使用本工具">🎮</span>' : '';
+  const selfTag = selfName && p.name === selfName ? '<span class="pself">' + I18N.t('common.me') + '</span>' : '';
+  const toolTag = toolUserIds.has(String(p.id)) ? '<span class="ptool" title="' + I18N.t('common.alsoUsing') + '">🎮</span>' : '';
   let statHtml = '';
-  if (p.status === 'loading') statHtml = '<span class="loading">查询中…</span>';
+  if (p.status === 'loading') statHtml = '<span class="loading">' + I18N.t('common.loading') + '</span>';
   else if (p.error) {
-    if (p.localSnapshot) statHtml = `<span class="dim">本地 ELO ${p.localSnapshot.elo ?? '-'}${p.localSnapshot.winRate != null ? ` · 胜率 ${p.localSnapshot.winRate}%` : ''}（离线，${fmtTime(p.localSnapshot.at)}）</span>`;
+    if (p.localSnapshot) statHtml = `<span class="dim">${I18N.t('common.localElo', { v: p.localSnapshot.elo ?? '-' })}${p.localSnapshot.winRate != null ? I18N.t('common.winRate', { v: p.localSnapshot.winRate }) : ''}${I18N.t('common.offlineSnapshot', { t: fmtTime(p.localSnapshot.at) })}</span>`;
     else statHtml = `<span class="err">${esc(p.error)}</span>`;
   }
   else if (p.info) {
@@ -228,35 +229,35 @@ function playerCard(p) {
     statHtml = `
       <span class="elo">ELO ${p.info.elo ?? '-'}</span>
       ${p.info.kd != null ? `<span>K/D ${p.info.kd}</span>` : ''}
-      ${p.info.winRate != null ? `<span class="wr">胜率 ${p.info.winRate}%</span>` : ''}
-      ${p.info.matchCount ? `<span>样本 ${p.info.matchCount}</span>` : ''}
+      ${p.info.winRate != null ? `<span class="wr">${I18N.t('common.winRate', { v: p.info.winRate })}</span>` : ''}
+      ${p.info.matchCount ? `<span>${I18N.t('common.sample', { n: p.info.matchCount })}</span>` : ''}
       ${p.info.category ? `<span class="cat">${esc(catLabel(p.info.category))}</span>` : ''}
-      ${units ? `<span class="topu" title="最爱：${esc(p.info.topUnits)}">${esc(units)}</span>` : ''}`;
+      ${units ? `<span class="topu" title="${I18N.t('common.fav', { u: esc(p.info.topUnits) })}">${esc(units)}</span>` : ''}`;
   }
-  return `<div class="player-card" data-id="${p.id}" data-name="${esc(p.name)}" data-link="${PLAYER_URL(p.id)}" title="左键：完整报告；右键：在 BATrace 打开">
-    <div class="prow"><span class="pname">${esc(p.name)}${selfTag}${toolTag}</span><span class="pid">ID ${esc(p.id)}</span><button class="p-copy" data-id="${p.id}" title="复制该玩家一行情报">📋</button><span class="pmark">›</span></div>
-    <div class="pstats">${statHtml || '<span class="dim">未查询</span>'}</div>
+  return `<div class="player-card" data-id="${p.id}" data-name="${esc(p.name)}" data-link="${PLAYER_URL(p.id)}" title="${I18N.t('common.leftClickFull')}">
+    <div class="prow"><span class="pname">${esc(p.name)}${selfTag}${toolTag}</span><span class="pid">ID ${esc(p.id)}</span><button class="p-copy" data-id="${p.id}" title="${I18N.t('common.copyRow')}">📋</button><span class="pmark">›</span></div>
+    <div class="pstats">${statHtml || '<span class="dim">' + I18N.t('common.notQueried') + '</span>'}</div>
   </div>`;
 }
 
 function renderMatchGrid() {
   const players = Object.values(matchRows);
-  if (!players.length) { $('teamGrid').innerHTML = '<span class="dim">暂无名单</span>'; return; }
-  const copyLabel = (cls) => cls === 'lobby' ? '复制全部' : '复制单队';
+  if (!players.length) { $('teamGrid').innerHTML = '<span class="dim">' + I18N.t('common.noRoster') + '</span>'; return; }
+  const copyLabel = (cls) => cls === 'lobby' ? I18N.t('team.copyAll') : I18N.t('team.copyTeam');
   const col = (title, cls, list, wide) => `
     <div class="team-col ${cls}${wide ? ' wide' : ''}">
-      <h3>${title}（${list.length}）${list.length ? `<button class="team-copy ghost" data-team="${cls}" title="复制本队 名字+ELO 一行">📋 ${copyLabel(cls)}</button>` : ''}</h3>
+      <h3>${title}（${list.length}）${list.length ? `<button class="team-copy ghost" data-team="${cls}" title="${I18N.t('common.copyTeamRow')}">📋 ${copyLabel(cls)}</button>` : ''}</h3>
       ${list.map(playerCard).join('') || '<span class="dim">-</span>'}
     </div>`;
   if (!session.current) {
-    $('teamGrid').innerHTML = col('房间内玩家（未开战，点击卡片可粗查）', 'lobby', players, true);
+    $('teamGrid').innerHTML = col(I18N.t('team.roomPlayers'), 'lobby', players, true);
     return;
   }
   const alpha = players.filter((p) => p.team === 'Alpha');
   const bravo = players.filter((p) => p.team === 'Bravo');
   const other = players.filter((p) => p.team !== 'Alpha' && p.team !== 'Bravo');
-  let html = col('Alpha 队', 'alpha', alpha) + col('Bravo 队', 'bravo', bravo);
-  if (other.length) html += col('观战 / 其他', '', other);
+  let html = col(I18N.t('team.alpha'), 'alpha', alpha) + col(I18N.t('team.bravo'), 'bravo', bravo);
+  if (other.length) html += col(I18N.t('team.specOther'), '', other);
   $('teamGrid').innerHTML = html;
 }
 
@@ -267,7 +268,7 @@ function togglePrevView() {
   if (prevLoading) return;
   const m = archiveList[0];
   if (!m || !m.fid) {
-    $('matchInfo').innerHTML = '<span class="dim">暂无上一局记录（还没有完成的对局）。</span>';
+    $('matchInfo').innerHTML = '<span class="dim">' + I18N.t('match.noPrev') + '</span>';
     $('teamGrid').innerHTML = '<span class="dim">-</span>';
     return;
   }
@@ -275,7 +276,7 @@ function togglePrevView() {
   BA.getMatchDetail(m.fid).then((d) => {
     prevLoading = false;
     if (!d || !d.players || !d.players.length) {
-      $('matchInfo').innerHTML = '<span class="dim">暂无上一局记录（还没有完成的对局）。</span>';
+      $('matchInfo').innerHTML = '<span class="dim">' + I18N.t('match.noPrev') + '</span>';
       $('teamGrid').innerHTML = '<span class="dim">-</span>';
       return;
     }
@@ -283,9 +284,9 @@ function togglePrevView() {
     prevMatch = d;
     prevRows = {};
     for (const p of d.players) prevRows[p.id] = { id: p.id, name: p.name, team: p.team, status: 'idle' };
-    $('currentCardTitle').textContent = '上一局';
-    const b = $('btnPrevMatch'); if (b) b.textContent = '🔄 返回当前';
-    $('matchInfo').innerHTML = `<span>地图：<b>${esc(d.map || '未知')}</b></span><span>对局ID：<b>${esc(d.fid || '-')}</b></span><span>结束时间：<b>${fmtTime(d.endTime)}</b></span><span>共 ${d.players.length} 人</span>`;
+    $('currentCardTitle').textContent = I18N.t('match.prev');
+    const b = $('btnPrevMatch'); if (b) b.textContent = I18N.t('match.backToCurrent');
+    $('matchInfo').innerHTML = `<span>${I18N.t('match.map', { v: '<b>' + esc(d.map || I18N.t('common.unknown')) + '</b>' })}</span><span>${I18N.t('match.fid', { v: '<b>' + esc(d.fid || '-') + '</b>' })}</span><span>${I18N.t('match.endTime', { v: '<b>' + fmtTime(d.endTime) + '</b>' })}</span><span>${I18N.t('match.playersN', { n: d.players.length })}</span>`;
     $('queryStatus').textContent = '';
     renderPrevGrid();
     // 打开即自动粗查一次（同一局去重）
@@ -297,7 +298,7 @@ function togglePrevView() {
     }
   }).catch(() => {
     prevLoading = false;
-    $('matchInfo').innerHTML = '<span class="dim">加载上一局失败，请重试。</span>';
+    $('matchInfo').innerHTML = '<span class="dim">' + I18N.t('match.prevLoadFail') + '</span>';
   });
 }
 function exitPrevView() {
@@ -305,7 +306,7 @@ function exitPrevView() {
   viewMode = 'current';
   prevMatch = null;
   prevRows = {};
-  const b = $('btnPrevMatch'); if (b) b.textContent = '🕘 上一局';
+  const b = $('btnPrevMatch'); if (b) b.textContent = I18N.t('btn.prevMatch');
   renderSession(session);
 }
 function resetPrevIfViewing() {
@@ -313,13 +314,13 @@ function resetPrevIfViewing() {
   viewMode = 'current';
   prevMatch = null;
   prevRows = {};
-  const b = $('btnPrevMatch'); if (b) b.textContent = '🕘 上一局';
+  const b = $('btnPrevMatch'); if (b) b.textContent = I18N.t('btn.prevMatch');
   const t = $('currentCardTitle');
-  if (t) t.textContent = session.current ? '当前对局' : '当前房间';
+  if (t) t.textContent = session.current ? I18N.t('match.current') : I18N.t('match.room');
 }
 function renderPrevGrid() {
   const players = Object.values(prevRows);
-  if (!players.length) { $('teamGrid').innerHTML = '<span class="dim">暂无名单</span>'; return; }
+  if (!players.length) { $('teamGrid').innerHTML = '<span class="dim">' + I18N.t('common.noRoster') + '</span>'; return; }
   const col = (title, cls, list, wide) => `
     <div class="team-col ${cls}${wide ? ' wide' : ''}">
       <h3>${title}（${list.length}）</h3>
@@ -328,14 +329,14 @@ function renderPrevGrid() {
   const alpha = players.filter((p) => p.team === 'Alpha');
   const bravo = players.filter((p) => p.team === 'Bravo');
   const other = players.filter((p) => p.team !== 'Alpha' && p.team !== 'Bravo');
-  let html = col('Alpha 队', 'alpha', alpha) + col('Bravo 队', 'bravo', bravo);
-  if (other.length) html += col('观战 / 其他', '', other);
+  let html = col(I18N.t('team.alpha'), 'alpha', alpha) + col(I18N.t('team.bravo'), 'bravo', bravo);
+  if (other.length) html += col(I18N.t('team.specOther'), '', other);
   $('teamGrid').innerHTML = html;
 }
 
 async function loadReport(stbid, name) {
   const area = $('reportArea');
-  area.innerHTML = '<div class="dim">正在生成报告（一次 API 调用，稍候）…</div>';
+  area.innerHTML = '<div class="dim">' + esc(I18N.t('report.generating')) + '</div>';
   area.scrollIntoView({ behavior: 'smooth', block: 'start' });
   try {
     const r = await BA.playerReport(stbid);
@@ -344,7 +345,7 @@ async function loadReport(stbid, name) {
     renderReport(r, name);
     area.scrollIntoView({ behavior: 'smooth', block: 'start' });
   } catch (e) {
-    area.innerHTML = `<div class="loss">报告生成失败：${esc(e.message)}</div>`;
+    area.innerHTML = `<div class="loss">${esc(I18N.t('report.genFail', { msg: e.message }))}</div>`;
     area.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 }
@@ -357,69 +358,69 @@ function renderReport(r, name) {
           <span class="rname">${esc(name || r.name || r.stbid)}</span>
           <span class="dim">ID ${r.stbid}</span>
           <span class="dim">Lv.${r.level ?? '-'}</span>
-          <span class="tag" style="color:var(--warn)">仅有基础档案，无排位分析</span>
+          <span class="tag" style="color:var(--warn)">${esc(I18N.t('report.basicOnly'))}</span>
         </div>
         <div class="kv">
           <div class="item"><b>${r.elo ?? '-'}</b><span>ELO</span></div>
-          <div class="item"><b>${r.winRate != null ? r.winRate + '%' : '-'}</b><span>天梯胜率（${r.matchCount ?? 0} 场）</span></div>
-          <div class="item"><b>${r.wins ?? '-'} / ${r.losses ?? '-'}</b><span>胜 / 负</span></div>
+          <div class="item"><b>${r.winRate != null ? r.winRate + '%' : '-'}</b><span>${I18N.t('report.rankedWinRateN', { n: r.matchCount ?? 0 })}</span></div>
+          <div class="item"><b>${r.wins ?? '-'} / ${r.losses ?? '-'}</b><span>${I18N.t('report.winsLosses')}</span></div>
         </div>
-        <div class="dim" style="margin-top:8px">该玩家没有可用的排位分析数据（可能未打天梯、场次太少或数据未收录），无法生成详细报告与蛆指数。</div>
+        <div class="dim" style="margin-top:8px">${esc(I18N.t('report.noRankedData'))}</div>
       </div>`;
     return;
   }
   const cats = (r.categories || []).map((c) =>
     `<span class="tag">${esc(catLabel(c.key))}${c.pct != null ? ' ' + c.pct + '%' : ''}</span>`).join('');
   const fav = (r.favUnits || []).map((u) =>
-    `<span class="tag" title="出场 ${u.spawn ?? '-'} 次">${esc(u.name)}${u.val ? '（输出 ' + Math.round(u.val) + '）' : ''}</span>`).join('');
+    `<span class="tag" title="${I18N.t('report.spawnsN', { n: u.spawn ?? '-' })}">${esc(u.name)}${u.val ? I18N.t('report.dmgOut', { v: Math.round(u.val) }) : ''}</span>`).join('');
   const maps = (r.mapStats || []).map((m) =>
-    `<span class="tag" title="场次 ${m.matchCount ?? '-'}">${esc(m.name)}${m.winRate != null ? ' ' + m.winRate + '%' : ''}</span>`).join('');
+    `<span class="tag" title="${I18N.t('report.matchesN', { n: m.matchCount ?? '-' })}">${esc(m.name)}${m.winRate != null ? ' ' + m.winRate + '%' : ''}</span>`).join('');
   const style = styleLabel(r.playStyle && r.playStyle.primaryStyle);
   const rows = (r.recentMatches || []).map((m) => `
     <tr>
-      <td class="${m.win == null ? 'unk' : m.win ? 'win' : 'loss'}">${m.win == null ? '未知' : m.win ? '胜' : '负'}</td>
+      <td class="${m.win == null ? 'unk' : m.win ? 'win' : 'loss'}">${m.win == null ? I18N.t('common.unknown') : m.win ? I18N.t('common.win') : I18N.t('common.loss')}</td>
       <td>${fmtDelta(m.eloDelta)}</td>
       <td>${m.kd ?? '-'}</td>
       <td>${m.dmr ?? '-'}</td>
       <td>${m.destruction ?? '-'}</td>
       <td>${m.losses ?? '-'}</td>
       <td>${m.objectives ?? '-'}</td>
-      <td class="dim" data-link="${MATCH_URL(m.matchId)}" title="右键：在 BATrace 打开">${esc(m.matchId ?? '-')}</td>
+      <td class="dim" data-link="${MATCH_URL(m.matchId)}" title="${I18N.t('common.rightClickBatrace')}">${esc(m.matchId ?? '-')}</td>
     </tr>`).join('');
-  const catText = (r.categories || []).map((c) => catLabel(c.key)).join('/') || '无';
-  const favText = (r.favUnits || []).map((u) => u.name).join('/') || '无';
-  const copyText = `玩家 ${name || r.stbid} (ID: ${r.stbid}) | ELO: ${r.elo ?? '无'} | 偏好: ${catText} | 最爱: ${favText}`;
+  const catText = (r.categories || []).map((c) => catLabel(c.key)).join('/') || I18N.t('common.none');
+  const favText = (r.favUnits || []).map((u) => u.name).join('/') || I18N.t('common.none');
+  const copyText = I18N.t('report.playerLine', { name: name || r.stbid, id: r.stbid, elo: r.elo ?? I18N.t('common.none'), cat: catText, top: favText });
   $('reportArea').innerHTML = `
     <div class="report">
       <div class="report-head">
-        <span class="rname" data-link="${PLAYER_URL(r.stbid)}" title="右键：在 BATrace 打开">${esc(name || r.stbid)}</span>
+        <span class="rname" data-link="${PLAYER_URL(r.stbid)}" title="${I18N.t('common.rightClickBatrace')}">${esc(name || r.stbid)}</span>
         <span class="dim">ID ${r.stbid}</span>
-        <span class="dim">样本 ${r.matchCount ?? '-'} 场</span>
-        <button id="btnCopyReport" class="ghost" style="margin-left:auto">📋 复制单行</button>
-        <button id="btnMaggotFromReport" class="accent">🐛 查蛆指数</button>
+        <span class="dim">${I18N.t('common.sampleMatches', { n: r.matchCount ?? '-' })}</span>
+        <button id="btnCopyReport" class="ghost" style="margin-left:auto">${I18N.t('report.copySingle')}</button>
+        <button id="btnMaggotFromReport" class="accent">${I18N.t('btn.maggot')}</button>
       </div>
       <div class="kv">
         <div class="item"><b>${r.elo ?? '-'}</b><span>ELO</span></div>
-        <div class="item"><b>${r.winRate != null ? r.winRate + '%' : '-'}</b><span>胜率（${r.matchCount ?? 0} 场）</span></div>
-        <div class="item"><b>${r.wins ?? '-'} / ${r.losses ?? '-'}</b><span>胜 / 负</span></div>
-        <div class="item"><b>${r.kd ?? '-'}</b><span>最新 K/D</span></div>
-        <div class="item"><b>${r.dmr ?? '-'}</b><span>最新 DMR</span></div>
-        <div class="item"><b>${esc(style)}</b><span>打法</span></div>
+        <div class="item"><b>${r.winRate != null ? r.winRate + '%' : '-'}</b><span>${I18N.t('report.winRateN', { n: r.matchCount ?? 0 })}</span></div>
+        <div class="item"><b>${r.wins ?? '-'} / ${r.losses ?? '-'}</b><span>${I18N.t('report.winsLosses')}</span></div>
+        <div class="item"><b>${r.kd ?? '-'}</b><span>${I18N.t('report.latestKd')}</span></div>
+        <div class="item"><b>${r.dmr ?? '-'}</b><span>${I18N.t('report.latestDmr')}</span></div>
+        <div class="item"><b>${esc(style)}</b><span>${I18N.t('report.style')}</span></div>
       </div>
-      ${cats ? `<div class="tags"><span class="dim">偏好：</span>${cats}</div>` : ''}
-      ${fav ? `<div class="favunits"><span class="dim">最爱单位：</span>${fav}</div>` : ''}
-      ${maps ? `<div class="favunits"><span class="dim">地图表现：</span>${maps}</div>` : ''}
+      ${cats ? `<div class="tags"><span class="dim">${I18N.t('report.prefLabel')}</span>${cats}</div>` : ''}
+      ${fav ? `<div class="favunits"><span class="dim">${I18N.t('report.favLabel')}</span>${fav}</div>` : ''}
+      ${maps ? `<div class="favunits"><span class="dim">${I18N.t('report.mapLabel')}</span>${maps}</div>` : ''}
       <table class="matches">
-        <thead><tr><th>结果</th><th>ELO变化</th><th>K/D</th><th>DMR</th><th>摧毁</th><th>损失</th><th>占点</th><th>对局ID</th></tr></thead>
-        <tbody>${rows || '<tr><td colspan="8" class="dim">无近期对局</td></tr>'}</tbody>
+        <thead><tr><th>${I18N.t('report.thResult')}</th><th>${I18N.t('report.thElo')}</th><th>${I18N.t('report.thKd')}</th><th>${I18N.t('report.thDmr')}</th><th>${I18N.t('report.thDestr')}</th><th>${I18N.t('report.thLosses')}</th><th>${I18N.t('report.thObj')}</th><th>${I18N.t('report.thFid')}</th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="8" class="dim">' + I18N.t('report.noRecent') + '</td></tr>'}</tbody>
       </table>
-      <div class="dim" style="margin-top:8px">提示：蛆指数需要最近 12 场对局明细，请点上方「🐛 查蛆指数」按钮单独查询（约 13 次调用，24 小时缓存后仅 1 次）。</div>
+      <div class="dim" style="margin-top:8px">${esc(I18N.t('report.hint'))}</div>
     </div>`;
   const copyBtn = $('btnCopyReport');
   if (copyBtn) copyBtn.onclick = () => {
     navigator.clipboard.writeText(copyText).then(() => {
-      copyBtn.textContent = '✅ 已复制';
-      setTimeout(() => { copyBtn.textContent = '📋 复制单行'; }, 1500);
+      copyBtn.textContent = I18N.t('report.copied');
+      setTimeout(() => { copyBtn.textContent = I18N.t('report.copySingle'); }, 1500);
     }).catch(() => {});
   };
   const mgBtn = $('btnMaggotFromReport');
@@ -427,32 +428,33 @@ function renderReport(r, name) {
 }
 
 const STYLE_LABELS = {
-  team_player: '团队型', combat_focused: '作战型', balanced_combat: '均衡作战',
-  balanced_economy: '均衡经济', economy_focused: '经济型', aggressive: '激进型',
-  defensive: '防守型', support: '支援型'
+  team_player: 'style.team_player', combat_focused: 'style.combat_focused', balanced_combat: 'style.balanced_combat',
+  balanced_economy: 'style.balanced_economy', economy_focused: 'style.economy_focused', aggressive: 'style.aggressive',
+  defensive: 'style.defensive', support: 'style.support'
 };
-function styleLabel(key) { if (!key) return '-'; return STYLE_LABELS[String(key).toLowerCase()] || String(key); }
+function styleLabel(key) { if (!key) return '-'; const k = STYLE_LABELS[String(key).toLowerCase()]; return k ? I18N.t(k) : String(key); }
 
 // ---- 对局档案（本地 matches 表，最近 500 局） ----------
 // 对局状态（本机视角）：观战 / 胜 / 负 / 未知
 function matchState(m) {
-  if (m.localSpectator) return { text: '观战', cls: 'spec' };
-  if (m.localWon === true) return { text: '胜', cls: 'win' };
-  if (m.localWon === false) return { text: '负', cls: 'loss' };
-  return { text: '未知', cls: 'unk' };
+  if (m.restarted) return { text: I18N.t('common.restarted'), cls: 'unk' };
+  if (m.localSpectator) return { text: I18N.t('common.spectate'), cls: 'spec' };
+  if (m.localWon === true) return { text: I18N.t('common.win'), cls: 'win' };
+  if (m.localWon === false) return { text: I18N.t('common.loss'), cls: 'loss' };
+  return { text: I18N.t('common.unknown'), cls: 'unk' };
 }
 function renderArchive(list) {
   archiveList = Array.isArray(list) ? list : [];
   const el = $('archiveList');
   if (!el) return;
   if (!list.length) {
-    el.innerHTML = '<span class="dim">暂无对局记录（本地 matches 表为空）。</span>';
+    el.innerHTML = '<span class="dim">' + esc(I18N.t('archive.empty')) + '</span>';
     return;
   }
-  const modeBadge = (m) => m.mode === 'custom' ? '<span class="mode-tag custom">自定义</span>' : m.mode === 'ranked' ? '<span class="mode-tag ranked">排位</span>' : (m.custom === true ? '<span class="mode-tag custom">自定义</span>' : m.custom === false ? '<span class="mode-tag ranked">排位</span>' : '<span class="dim">未知</span>');
+  const modeBadge = (m) => m.mode === 'custom' ? '<span class="mode-tag custom">' + esc(I18N.t('common.custom')) + '</span>' : m.mode === 'ranked' ? '<span class="mode-tag ranked">' + esc(I18N.t('common.ranked')) + '</span>' : (m.custom === true ? '<span class="mode-tag custom">' + esc(I18N.t('common.custom')) + '</span>' : m.custom === false ? '<span class="mode-tag ranked">' + esc(I18N.t('common.ranked')) + '</span>' : '<span class="dim">' + esc(I18N.t('common.unknown')) + '</span>');
   el.innerHTML = `
     <table class="archive-table">
-      <thead><tr><th>状态</th><th>模式</th><th>地图</th><th>ELO</th><th>时间</th><th>账号</th></tr></thead>
+      <thead><tr><th>${I18N.t('archive.thStatus')}</th><th>${I18N.t('archive.thMode')}</th><th>${I18N.t('archive.thMap')}</th><th>${I18N.t('archive.thElo')}</th><th>${I18N.t('archive.thTime')}</th><th>${I18N.t('archive.thAccount')}</th></tr></thead>
       <tbody>${list.map((m) => {
         const fid = m.fid || '';
         const link = fid ? ` data-link="${MATCH_URL(fid)}"` : '';
@@ -460,10 +462,10 @@ function renderArchive(list) {
         const hasReplay = !!(m.fid && replayFids.has(String(m.fid)));
         const elo = m.localEloDelta != null ? fmtDelta(m.localEloDelta) + ' / ' + fmtElo(m.localEloAfter) : '-';
         const who = m.localPersona || m.localName || '';
-        return `<tr class="archive-row"${link} data-fid="${fid}" title="左键：详情；右键：在 BATrace 打开对局">
+        return `<tr class="archive-row"${link} data-fid="${fid}" title="${esc(I18N.t('archive.rowTitle'))}">
           <td class="${st.cls}">${st.text}</td>
           <td>${modeBadge(m)}</td>
-          <td>${esc(m.map || '未知地图')}${hasReplay ? ' <span class="replay-mark" title="该对局有录像，点击播放" role="button">📹</span>' : ''}</td>
+          <td>${esc(m.map || I18N.t('common.unknownMap'))}${hasReplay ? ' <span class="replay-mark" title="' + esc(I18N.t('archive.replayMarkTitle')) + '" role="button">📹</span>' : ''}</td>
           <td class="${m.localEloDelta == null ? 'dim' : m.localEloDelta > 0 ? 'win' : 'loss'}">${elo}</td>
           <td class="dim">${fmtTime(m.endTime)}</td>
           <td class="dim">${who ? '[' + esc(who) + ']' : ''}</td>
@@ -488,14 +490,14 @@ function renderArchive(list) {
 async function openReplayForFid(fid) {
   try {
     const items = await collectReplayItemsForFid(fid);
-    if (!items.length) { setStatus('该对局暂无录像可播放', false); return; }
+    if (!items.length) { setStatus(I18N.t('status.replayOpened'), false); return; }
     let chosen = items[0];
     if (items.length > 1) {
       chosen = await pickReplay(items);
       if (!chosen) return;
     }
     await playReplayItem(chosen);
-  } catch (e) { setStatus('打开录像失败：' + e.message, false); }
+  } catch (e) { setStatus(I18N.t('status.openReplayFail', { msg: e.message }), false); }
 }
 
 // 收集某对局所有本地录像视角（无云端；同一对局可能有多份本地文件）
@@ -527,20 +529,22 @@ async function playReplayItem(item) {
       return;
     }
   }
-  setStatus('该对局暂无录像可播放', false);
+  setStatus(I18N.t('status.replayOpened'), false);
 }
 
 let replayPickResolve = null;
 let lastVersionInfo = null; // 最近一次版本信息（下载按钮用）
+let lastHeartbeat = null;   // 最近一次心跳（语言切换时重渲染）
+let currentCfg = null;      // 最近一次配置（语言切换时重渲染录像提示）
 function pickReplay(items) {
   return new Promise((resolve) => {
     replayPickResolve = resolve;
     const wrap = $('replayPickerList');
     if (!wrap) { resolve(null); return; }
     wrap.innerHTML = (items || []).map((it, i) => `
-      <div class="inv-item replay-pick-item" data-idx="${i}" title="点击播放">
-        <span class="r-name">${esc(it.name || '未知')}</span>
-        <span class="r-src local">📁 本地</span>
+      <div class="inv-item replay-pick-item" data-idx="${i}" title="${I18N.t('common.clickPlay')}">
+        <span class="r-name">${esc(it.name || I18N.t('common.unknown'))}</span>
+        <span class="r-src local">${I18N.t('replay.localTag')}</span>
         ${replayTeamTag(it.team != null && it.team !== '' ? it.team : it.teamId)}
         <span class="dim">${it.durationSec ? fmtDuration(it.durationSec) : '-'}</span>
         <span class="dim">${fmtSize(it.size)}</span>
@@ -557,9 +561,9 @@ function pickReplay(items) {
 // ---------- 对局详情弹窗 ----------
 async function openMatchDetail(fid) {
   $('matchModal').classList.remove('hidden');
-  $('matchTitle').textContent = '对局详情';
-  $('matchFid').textContent = '对局 ID ' + fid;
-  $('matchDetailBody').innerHTML = '<div class="dim">载入中…</div>';
+  $('matchTitle').textContent = I18N.t('modal.matchDetail');
+  $('matchFid').textContent = I18N.t('match.id', { id: fid });
+  $('matchDetailBody').innerHTML = '<div class="dim">' + esc(I18N.t('loading.detail')) + '</div>';
   clearInvGameTimer();
   stopRadarLoading();
   // 250ms 内未返回（即真实请求）再显示雷达加载动画；本地/缓存命中不闪
@@ -572,20 +576,21 @@ async function openMatchDetail(fid) {
   } catch (e) {
     if (radarTimer) { clearTimeout(radarTimer); radarTimer = null; }
     stopRadarLoading();
-    $('matchDetailBody').innerHTML = '<div class="loss">加载失败：' + esc(e.message) + '</div>';
+    $('matchDetailBody').innerHTML = '<div class="loss">' + esc(I18N.t('match.loadFail', { msg: e.message })) + '</div>';
   }
 }
 function renderMatchDetail(d) {
-  if (!d) { $('matchDetailBody').innerHTML = '<div class="dim">本地无此对局记录。</div>'; return; }
-  $('matchTitle').textContent = d.map || '未知地图';
-  $('matchFid').textContent = '对局 ID ' + d.fid;
-  const modeTxt = d.mode === 'custom' ? '自定义' : d.mode === 'ranked' ? '排位' : (d.custom === true ? '自定义' : d.custom === false ? '排位' : '未知');
+  if (!d) { $('matchDetailBody').innerHTML = '<div class="dim">' + esc(I18N.t('match.noRecord')) + '</div>'; return; }
+  $('matchTitle').textContent = d.map || I18N.t('common.unknownMap');
+  $('matchFid').textContent = I18N.t('match.id', { id: d.fid });
+  const modeTxt = d.mode === 'custom' ? I18N.t('common.custom') : d.mode === 'ranked' ? I18N.t('common.ranked') : (d.custom === true ? I18N.t('common.custom') : d.custom === false ? I18N.t('common.ranked') : I18N.t('common.unknown'));
   const st = matchState(d);
   const elo = d.localEloDelta != null ? fmtDelta(d.localEloDelta) : '-';
   const settle = d.localEloAfter != null ? fmtElo(d.localEloAfter) : '-';
   const sc = d.localScores ? (d.localScores.destruction ?? '-') + '/' + (d.localScores.losses ?? '-') : '-';
   const account = d.localPersona || d.localName || '';
-  const fetchNote = d.fetched ? '<div class="dim">（已从 API 补齐）</div>' : (d.fetchError ? `<div class="dim">（API 补齐失败：${esc(d.fetchError)}）</div>` : '');
+  const fetchNote = d.fetched ? '<div class="dim">' + esc(I18N.t('match.fetchNote')) + '</div>' : (d.fetchError ? `<div class="dim">${esc(I18N.t('match.fetchError', { msg: d.fetchError }))}</div>` : '');
+  const restartNote = d.restarted ? '<div class="dim">' + esc(I18N.t('match.restartNote')) + '</div>' : '';
   const groups = { 0: [], 1: [], 100: [], other: [] };
   for (const p of d.players || []) {
     let g;
@@ -607,8 +612,8 @@ function renderMatchDetail(d) {
     const sp = p.supplyPoints != null ? p.supplyPoints : '-';
     const ex = p.exp != null ? p.exp : '-';
     const md = p.medals != null ? p.medals : '-';
-    return `<tr data-id="${esc(p.id)}" data-name="${esc(p.name || '')}" data-link="${PLAYER_URL(p.id)}" title="右键：调查羁绊 / BATrace">
-      <td><b>${esc(p.name || '未知')}</b></td>
+    return `<tr data-id="${esc(p.id)}" data-name="${esc(p.name || '')}" data-link="${PLAYER_URL(p.id)}" title="${I18N.t('inv.rightClickInv')}">
+      <td><b>${esc(p.name || I18N.t('common.unknown'))}</b></td>
       <td class="dim md-id-cell"><span class="md-id">${esc(p.id)}</span></td>
       <td>${delta}</td>
       <td class="dim">${score}</td>
@@ -630,32 +635,33 @@ function renderMatchDetail(d) {
           <col style="width:7%"><col style="width:7%"><col style="width:9%"><col style="width:9%">
           <col style="width:6%"><col style="width:7%"><col style="width:7%"><col style="width:6%">
         </colgroup>
-        <thead><tr><th>玩家</th><th>ID</th><th>ELO变化</th><th>评分</th><th>占点</th><th>击杀</th><th>伤害</th><th>承伤</th><th>K/D</th><th>补给</th><th>经验</th><th>奖牌</th></tr></thead>
+        <thead><tr><th>${I18N.t('match.thPlayer')}</th><th>${I18N.t('match.thId')}</th><th>${I18N.t('match.thElo')}</th><th>${I18N.t('match.thScore')}</th><th>${I18N.t('match.thObj')}</th><th>${I18N.t('match.thKills')}</th><th>${I18N.t('match.thDmg')}</th><th>${I18N.t('match.thDmgTaken')}</th><th>${I18N.t('match.thKd')}</th><th>${I18N.t('match.thSupply')}</th><th>${I18N.t('match.thExp')}</th><th>${I18N.t('match.thMedals')}</th></tr></thead>
         <tbody>${list.map(playerRow).join('')}</tbody>
       </table>
     </div>` : '';
   let body = '';
   if (d.winnerTeam === 0 || d.winnerTeam === 1) {
     const w = d.winnerTeam, l = d.winnerTeam === 0 ? 1 : 0;
-    body = group('🏆 胜方 ' + (w === 0 ? 'Alpha' : 'Bravo'), groups[w]) + group('💀 败方 ' + (l === 0 ? 'Alpha' : 'Bravo'), groups[l]);
+    body = group(I18N.t('match.groupWinner', { team: w === 0 ? I18N.t('match.teamAlpha') : I18N.t('match.teamBravo') }), groups[w]) + group(I18N.t('match.groupLoser', { team: l === 0 ? I18N.t('match.teamAlpha') : I18N.t('match.teamBravo') }), groups[l]);
   } else {
-    body = group('Alpha 队', groups[0]) + group('Bravo 队', groups[1]);
+    body = group(I18N.t('match.groupAlpha'), groups[0]) + group(I18N.t('match.groupBravo'), groups[1]);
   }
-  body += group('👁 观战', groups[100]) + group('其他', groups.other);
+  body += group(I18N.t('match.groupSpec'), groups[100]) + group(I18N.t('match.groupOther'), groups.other);
   $('matchDetailBody').innerHTML = `
     <div class="inv-stats">
-      <div class="inv-stat"><b>${esc(d.fid)}</b><span>对局 ID</span></div>
-      <div class="inv-stat"><b>${esc(d.map || '未知地图')}</b><span>地图</span></div>
-      <div class="inv-stat"><b>${fmtTime(d.endTime)}</b><span>时间</span></div>
-      <div class="inv-stat"><b>${fmtDuration(d.durationSec)}</b><span>时长</span></div>
-      <div class="inv-stat"><b>${modeTxt}</b><span>模式</span></div>
-      <div class="inv-stat"><b class="${st.cls}">${st.text}</b><span>结果</span></div>
-      <div class="inv-stat"><b>${elo}</b><span>ELO变化</span></div>
-      <div class="inv-stat"><b>${settle}</b><span>结算ELO</span></div>
-      <div class="inv-stat"><b>${sc}</b><span>评分</span></div>
-      <div class="inv-stat"><b>${account ? esc(account) : '-'}</b><span>本机账号</span></div>
+      <div class="inv-stat"><b>${esc(d.fid)}</b><span>${I18N.t('match.idStat')}</span></div>
+      <div class="inv-stat"><b>${esc(d.map || I18N.t('common.unknownMap'))}</b><span>${I18N.t('match.mapStat')}</span></div>
+      <div class="inv-stat"><b>${fmtTime(d.endTime)}</b><span>${I18N.t('match.timeStat')}</span></div>
+      <div class="inv-stat"><b>${fmtDuration(d.durationSec)}</b><span>${I18N.t('match.durationStat')}</span></div>
+      <div class="inv-stat"><b>${modeTxt}</b><span>${I18N.t('match.modeStat')}</span></div>
+      <div class="inv-stat"><b class="${st.cls}">${st.text}</b><span>${I18N.t('match.resultStat')}</span></div>
+      <div class="inv-stat"><b>${elo}</b><span>${I18N.t('match.eloDeltaStat')}</span></div>
+      <div class="inv-stat"><b>${settle}</b><span>${I18N.t('match.settleEloStat')}</span></div>
+      <div class="inv-stat"><b>${sc}</b><span>${I18N.t('match.scoreStat')}</span></div>
+      <div class="inv-stat"><b>${account ? esc(account) : '-'}</b><span>${I18N.t('match.localAccountStat')}</span></div>
     </div>
     ${fetchNote}
+    ${restartNote}
     ${body}`;
 }
 
@@ -664,19 +670,19 @@ async function refreshDecks() {
   try {
     const d = await BA.listDecks();
     const fmt = (s) => s ? (s.length > 70 ? '…' + s.slice(-70) : s) : '';
-    $('deckPaths').textContent = `前线 ${fmt(d.decksDir)} ｜ 后勤 ${fmt(d.backupsDir)} `;
+    $('deckPaths').textContent = I18N.t('deck.paths', { f: fmt(d.decksDir), b: fmt(d.backupsDir) }) + ' ';
     const front = $('deckFront');
     const back = $('deckBack');
     if (!d.found) {
-      front.innerHTML = '<option disabled>未找到卡组目录（游戏未安装 / 未运行过）</option>';
-      back.innerHTML = '<option disabled>（无备份）</option>';
-      deckMsg('未找到游戏卡组目录：' + d.decksDir + '。请确认《断箭》已安装并至少运行过一次。', true);
+      front.innerHTML = '<option disabled>' + I18N.t('deck.noDirOpt') + '</option>';
+      back.innerHTML = '<option disabled>' + I18N.t('deck.noBackupOpt') + '</option>';
+      deckMsg(I18N.t('deck.noDirMsg', { dir: d.decksDir }), true);
       return;
     }
-    front.innerHTML = d.decks.map((f) => `<option value="${esc(f.name)}">${esc(f.name)}</option>`).join('') || '<option disabled>（空）</option>';
-    back.innerHTML = d.backups.map((f) => `<option value="${esc(f.name)}">${esc(f.name)}</option>`).join('') || '<option disabled>（空）</option>';
+    front.innerHTML = d.decks.map((f) => `<option value="${esc(f.name)}">${esc(f.name)}</option>`).join('') || '<option disabled>' + I18N.t('deck.emptyOpt') + '</option>';
+    back.innerHTML = d.backups.map((f) => `<option value="${esc(f.name)}">${esc(f.name)}</option>`).join('') || '<option disabled>' + I18N.t('deck.emptyOpt') + '</option>';
   } catch (e) {
-    deckMsg('卡组列表加载失败：' + e.message, true);
+    deckMsg(I18N.t('deck.loadFail', { msg: e.message }), true);
   }
 }
 
@@ -699,13 +705,13 @@ function allDeckNames() {
 }
 async function doBackup() {
   const names = selectedOptions($('deckFront'));
-  if (!names.length) { deckMsg('请先在前线卡组选择要备份的卡组（Ctrl+单击可多选）', true); return; }
+  if (!names.length) { deckMsg(I18N.t('deck.needSelectFront'), true); return; }
   backupAllPending = false;
   showBackupRow();
 }
 async function doBackupAll() {
   const names = allDeckNames();
-  if (!names.length) { deckMsg('左侧没有可备份的卡组', true); return; }
+  if (!names.length) { deckMsg(I18N.t('deck.noneFront'), true); return; }
   backupAllPending = true;
   for (const o of $('deckFront').options) if (!o.disabled) o.selected = true;
   showBackupRow();
@@ -713,7 +719,7 @@ async function doBackupAll() {
 async function confirmBackup() {
   const names = backupAllPending ? allDeckNames() : selectedOptions($('deckFront'));
   const pkg = $('backupName').value.trim();
-  if (!names.length || !pkg) { deckMsg('名称不能为空', true); return; }
+  if (!names.length || !pkg) { deckMsg(I18N.t('deck.nameEmpty'), true); return; }
   backupAllPending = false;
   try {
     const r = await BA.backupDecks(names, pkg);
@@ -721,11 +727,11 @@ async function confirmBackup() {
     $('backupRow').classList.add('hidden');
     if (r.ok) refreshDecks();
   } catch (e) {
-    deckMsg('备份失败：' + e.message, true);
+    deckMsg(I18N.t('deck.backupFail', { msg: e.message }), true);
   }
 }
 async function doSyncRestore() {
-  const ok = await askConfirm('是否替换成换号前的上一局卡组包？\n同名卡组将被覆盖，原包仍保留在后勤仓库（上一局卡组包.zip）');
+  const ok = await askConfirm(I18N.t('deck.confirmReplace'));
   if (!ok) return;
   try {
     const r = await BA.syncRestore();
@@ -733,11 +739,11 @@ async function doSyncRestore() {
     $('deckSyncAlert').classList.add('hidden');
     if (r.ok) refreshDecks();
   } catch (e) {
-    deckMsg('同步失败：' + e.message, true);
+    deckMsg(I18N.t('deck.syncFail', { msg: e.message }), true);
   }
 }
 async function doSyncIgnore() {
-  const ok = await askConfirm('忽略后，将以当前账号的卡组为基线，上一账号的归档仍保留在本地。确定忽略吗？');
+  const ok = await askConfirm(I18N.t('deck.confirmIgnore'));
   if (!ok) return;
   try {
     const r = await BA.syncIgnore();
@@ -745,7 +751,7 @@ async function doSyncIgnore() {
     $('deckSyncAlert').classList.add('hidden');
     refreshDecks();
   } catch (e) {
-    deckMsg('操作失败：' + e.message, true);
+    deckMsg(I18N.t('deck.opFail', { msg: e.message }), true);
   }
 }
 function dismissSyncAlert() {
@@ -761,7 +767,7 @@ function renderDeckSyncAlert(d) {
   if (f) f.textContent = d.from || '';
   const ai = $('syncAccountInfo');
   if (ai) {
-    if (d.to) ai.textContent = '（当前账号：' + d.to + '）';
+    if (d.to) ai.textContent = I18N.t('deck.currentAccount', { name: d.to });
     else ai.textContent = '';
   }
   el.classList.remove('hidden');
@@ -769,30 +775,30 @@ function renderDeckSyncAlert(d) {
 
 async function doDeploy() {
   const names = selectedOptions($('deckBack'));
-  if (!names.length) { deckMsg('请先在后勤仓库选择要部署的备份包', true); return; }
+  if (!names.length) { deckMsg(I18N.t('deck.needSelectBack'), true); return; }
   const pkg = names[0];
-  const ok = await askConfirm(`确定要从 ${pkg} 部署卡组吗？\n同名文件将被覆盖！`);
+  const ok = await askConfirm(I18N.t('deck.confirmDeploy', { pkg: pkg }));
   if (!ok) return;
   try {
     const r = await BA.deployDecks(pkg);
     deckMsg(r.message, !r.ok);
     if (r.ok) refreshDecks();
   } catch (e) {
-    deckMsg('部署失败：' + e.message, true);
+    deckMsg(I18N.t('deck.deployFail', { msg: e.message }), true);
   }
 }
 async function doDelete(kind, label) {
   const sel = kind === 'backups' ? $('deckBack') : $('deckFront');
   const names = selectedOptions(sel);
-  if (!names.length) { deckMsg(`请先选择要删除的${label}`, true); return; }
-  const ok = await askConfirm(`确定删除选中的 ${names.length} 个文件吗？`);
+  if (!names.length) { deckMsg(I18N.t('deck.needSelectDel', { label: label }), true); return; }
+  const ok = await askConfirm(I18N.t('deck.confirmDeleteN', { n: names.length }));
   if (!ok) return;
   try {
     const r = await BA.deleteDecks(kind, names);
     deckMsg(r.message, !r.ok);
     refreshDecks();
   } catch (e) {
-    deckMsg('删除失败：' + e.message, true);
+    deckMsg(I18N.t('deck.deleteFail', { msg: e.message }), true);
   }
 }
 
@@ -804,57 +810,57 @@ function renderApmStart(d) {
   const body = $('apmBody');
   if (!d || !d.available) {
     apmRunning = false;
-    const reason = !d ? 'APM 无法打开'
-      : d.reason === 'disabled' ? '未开启 APM 监测功能（请在「设置」中开启，默认关闭）'
-      : d.reason === 'replay' ? '当前为回放/历史日志，APM 无法统计'
-      : d.reason === 'hook' ? '输入钩子初始化失败，APM 无法打开'
-      : 'APM 无法打开';
-    if (meta) meta.textContent = 'APM 不可用';
+    const reason = !d ? I18N.t('apm.unavailable')
+      : d.reason === 'disabled' ? I18N.t('apm.reasonDisabled')
+      : d.reason === 'replay' ? I18N.t('apm.reasonReplay')
+      : d.reason === 'hook' ? I18N.t('apm.reasonHook')
+      : I18N.t('apm.unavailable');
+    if (meta) meta.textContent = I18N.t('apm.unavailableShort');
     if (body) body.innerHTML = `<div class="apm-empty loss">⚠️ ${reason}</div>`;
     return;
   }
   apmRunning = true;
-  if (meta) meta.textContent = d.map ? `对局进行中｜${esc(d.map)}` : '对局进行中';
-  if (body) body.innerHTML = `<div class="apm-live"><div class="apm-bignum" id="apmNow">0</div><div class="apm-live-label">当前 APM（每分钟操作数 = 鼠标点击 + 键盘按键）</div><div class="dim" id="apmLiveSub">统计中…</div></div>`;
+  if (meta) meta.textContent = d.map ? I18N.t('apm.ingameMap', { map: esc(d.map) }) : I18N.t('apm.ingame');
+  if (body) body.innerHTML = `<div class="apm-live"><div class="apm-bignum" id="apmNow">0</div><div class="apm-live-label">${I18N.t('apm.currentLabel')}</div><div class="dim" id="apmLiveSub">${I18N.t('apm.counting')}</div></div>`;
 }
 function renderApmLive(d) {
   if (!apmRunning || !d) return;
   const now = $('apmNow');
   if (now) now.textContent = d.apm;
   const sub = $('apmLiveSub');
-  if (sub) sub.textContent = `已进行 ${fmtDuration(d.durationSec)}｜总操作 ${d.totalActions}`;
+  if (sub) sub.textContent = I18N.t('apm.elapsed', { dur: fmtDuration(d.durationSec), n: d.totalActions });
 }
 function renderApmResult(r) {
   if (!r) return;
   apmRunning = false;
-  const focusNote = r.focusFilter ? '' : '<span class="dim">（未启用前台过滤，可能混入其他窗口输入）</span>';
+  const focusNote = r.focusFilter ? '' : '<span class="dim">' + I18N.t('apm.noFocusFilter') + '</span>';
   const max = Math.max(1, ...(r.perMinute || [1]));
   const bars = (r.minutes || []).map((m) => {
     const pct = Math.max(3, Math.round((m.actions / max) * 100));
-    return `<div class="apm-bar-wrap" title="第 ${m.m + 1} 分钟：${m.actions} 次操作"><div class="apm-bar" style="height:${pct}%"></div>${m.m % 5 === 0 ? '<span class="apm-min">' + (m.m + 1) + '</span>' : ''}</div>`;
+    return `<div class="apm-bar-wrap" title="${I18N.t('apm.minuteTitle', { n: m.m + 1, c: m.actions })}"><div class="apm-bar" style="height:${pct}%"></div>${m.m % 5 === 0 ? '<span class="apm-min">' + (m.m + 1) + '</span>' : ''}</div>`;
   }).join('');
-  const noData = r.totalActions <= 0 ? '<div class="dim">本局未统计到操作（可能整局游戏窗口未在前台）。</div>' : '';
+  const noData = r.totalActions <= 0 ? '<div class="dim">' + I18N.t('apm.noData') + '</div>' : '';
   const meta = $('apmMeta');
-  if (meta) meta.textContent = `已结束：${fmtDuration(r.durationSec)}｜总操作 ${r.totalActions}｜平均 APM ${r.avg}｜峰值 ${r.peak}/分钟`;
+  if (meta) meta.textContent = I18N.t('apm.ended', { dur: fmtDuration(r.durationSec), n: r.totalActions, avg: r.avg, peak: r.peak });
   const body = $('apmBody');
   if (body) body.innerHTML = `
     <div class="apm-summary">
-      <span class="apm-stat"><b>${r.totalActions}</b>总操作</span>
-      <span class="apm-stat"><b>${r.avg}</b>平均 APM</span>
-      <span class="apm-stat"><b>${r.peak}</b>峰值 APM</span>
-      <span class="apm-stat"><b>${fmtDuration(r.durationSec)}</b>时长</span>
+      <span class="apm-stat"><b>${r.totalActions}</b>${I18N.t('apm.totalOps')}</span>
+      <span class="apm-stat"><b>${r.avg}</b>${I18N.t('apm.avgApm')}</span>
+      <span class="apm-stat"><b>${r.peak}</b>${I18N.t('apm.peakApm')}</span>
+      <span class="apm-stat"><b>${fmtDuration(r.durationSec)}</b>${I18N.t('apm.duration')}</span>
     </div>
     <div class="apm-chart">${bars}</div>
-    <div class="dim note">数据来源：真实输入钩子（鼠标点击 + 键盘按键）${focusNote}</div>
+    <div class="dim note">${I18N.t('apm.source')}${focusNote}</div>
     ${noData}
   `;
 }
 function renderApmIdle() {
   apmRunning = false;
   const meta = $('apmMeta');
-  if (meta) meta.textContent = '等待对局…';
+  if (meta) meta.textContent = I18N.t('apm.waiting');
   const body = $('apmBody');
-  if (body) body.innerHTML = '<div class="apm-empty dim">对局开始后自动统计：仅记录游戏窗口在前台时的鼠标点击与键盘按键（全局只读钩子，不模拟、不拦截任何输入）。默认关闭，需在「设置」中开启「APM 监测功能」。对局结束自动生成每分钟操作图。</div>';
+  if (body) body.innerHTML = '<div class="apm-empty dim">' + I18N.t('apm.idleHint') + '</div>';
 }
 
 function setApmCollapsed(collapsed) {
@@ -862,7 +868,7 @@ function setApmCollapsed(collapsed) {
   if (!card) return;
   card.classList.toggle('collapsed', !!collapsed);
   const btn = $('btnApmToggle');
-  if (btn) btn.title = collapsed ? '展开 APM 统计' : '收起 APM 统计';
+  if (btn) btn.title = collapsed ? I18N.t('apm.expand') : I18N.t('apm.collapse');
 }
 function setApmVisible(visible) {
   const card = $('apmCard');
@@ -887,14 +893,14 @@ function openSettings() {
     savedTheme = cfg.theme || 'dark';
     setThemePicker(savedTheme);
     $('dirHint').textContent = '';
-  }).catch((e) => setStatus('读取设置失败：' + e.message, false));
+  }).catch((e) => setStatus(I18N.t('status.loadSettingsFail', { msg: e.message }), false));
 }
 
 // 容错绑定：元素缺失只提示，不中断后续按钮
 function on(id, event, handler) {
   const el = $(id);
   if (el) el.addEventListener(event, handler);
-  else console.error('缺少界面元素: ' + id);
+  else console.error(I18N.t('common.missingEl', { id: id }));
 }
 
 // ---------- 绑定所有按钮（同步执行，不依赖异步初始化） ----------
@@ -946,29 +952,23 @@ function showCtx(x, y, items) {
 async function refreshMatchRow(fid) {
   try {
     const r = await BA.refreshMatch(fid);
-    setStatus((r && r.message) || '已刷新对局信息', !!(r && r.ok));
-  } catch (e) { setStatus('刷新失败：' + e.message, false); }
+    setStatus((r && r.message) || I18N.t('status.refreshed'), !!(r && r.ok));
+  } catch (e) { setStatus(I18N.t('status.refreshFail', { msg: e.message }), false); }
 }
 document.addEventListener('contextmenu', (e) => {
-  const row = e.target.closest('.replay-row');
-  if (row) {
+  const rp = e.target.closest('.replay-row[data-key]');
+  if (rp) {
     e.preventDefault();
-    const fid = row.dataset.fid || '';
-    const src = row.dataset.source;
+    const fid = rp.dataset.fid || '';
     const items = [];
-    if (src === 'local' || src === 'both') {
-      items.push({ label: '📂 打开本地位置', action: () => BA.openLocalReplayFolder() });
-    }
-
-    if (fid) {
-      items.push({ label: '📊 打开对局详情', action: () => openMatchDetail(fid) });
-      items.push({ label: '🌐 在 BATrace 打开对局', action: () => openLink(MATCH_URL(fid)) });
-    }
-    if (src === 'both') {
-    items.push({ label: '🗑 删除本地录像', action: () => deleteReplayRow(row) });
-    } else {
-      items.push({ label: '🗑 删除录像', action: () => deleteReplayRow(row) });
-    }
+    if (fid) items.push({ label: I18N.t('ctx.openMatchDetail'), action: () => openMatchDetail(fid) });
+    items.push({ label: I18N.t('ctx.openLocation'), action: () => BA.openLocalReplayFolder() });
+    items.push({ label: I18N.t('ctx.deleteReplay'), action: async () => {
+      const ok = await askConfirm(I18N.t('confirm.deleteReplay'));
+      if (!ok) return;
+      try { await BA.deleteLocalReplay(rp.dataset.key); setStatus(I18N.t('status.deleted'), true); renderReplayList(); refreshReplayFids(); }
+      catch (err) { setStatus(I18N.t('status.deleteFailed', { msg: err.message }), false); }
+    } });
     showCtx(e.clientX, e.clientY, items);
     return;
   }
@@ -977,16 +977,16 @@ document.addEventListener('contextmenu', (e) => {
   e.preventDefault();
   const items = [];
   if (t.dataset.id) {
-    items.push({ label: '🔍 调查羁绊', action: () => openInvestigate(t.dataset.id, t.dataset.name) });
+    items.push({ label: I18N.t('ctx.investigate'), action: () => openInvestigate(t.dataset.id, t.dataset.name) });
   }
   if (t.dataset.fid) {
-    items.push({ label: '🔄 刷新对局信息', action: () => refreshMatchRow(t.dataset.fid) });
+    items.push({ label: I18N.t('ctx.refreshMatch'), action: () => refreshMatchRow(t.dataset.fid) });
   }
-  items.push({ label: '🌐 在 BATrace 打开', action: () => openLink(t.dataset.link) });
+  items.push({ label: I18N.t('ctx.openBatrace'), action: () => openLink(t.dataset.link) });
   showCtx(e.clientX, e.clientY, items);
 });
 document.addEventListener('click', () => hideCtx());
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { hideCtx(); clearInvGameTimer(); stopRadarLoading(); if (window.BAGame && BAGame.isOpen()) BAGame.close(); const bm = $('banAlertModal'); if (bm) bm.classList.add('hidden'); const m = $('investigateModal'); if (m) m.classList.add('hidden'); const mm = $('matchModal'); if (mm) mm.classList.add('hidden'); const rp = $('replayModal'); if (rp) closeReplayPlayer(); const pk = $('replayPickerModal'); if (pk) { pk.classList.add('hidden'); if (replayPickResolve) { replayPickResolve(null); replayPickResolve = null; } } } });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { hideCtx(); clearInvGameTimer(); stopRadarLoading(); if (window.BAGame && BAGame.isOpen()) BAGame.close(); const bm = $('banAlertModal'); if (bm) bm.classList.add('hidden'); const m = $('investigateModal'); if (m) m.classList.add('hidden'); const mm = $('matchModal'); if (mm) mm.classList.add('hidden'); const rp = $('replayModal'); if (rp) closeReplayPlayer(); const rsm = $('recSettingsModal'); if (rsm && !rsm.classList.contains('hidden')) closeRecSettings(); const pk = $('replayPickerModal'); if (pk) { pk.classList.add('hidden'); if (replayPickResolve) { replayPickResolve(null); replayPickResolve = null; } } } });
   const anm = $('announcementModal'); if (anm) anm.classList.add('hidden');
 
 ﻿﻿﻿// ---------- 调查加载雷达动画（纯视觉，不可交互） ----------
@@ -1066,14 +1066,14 @@ function stopRadarLoading() { if (radarLoading) { radarLoading.stop(); radarLoad
 
 // ---------- 玩家调查弹窗 ----------
 function encounterRelLabel(e) {
-  if (e.rel === 'spec') return '观战' + (e.won != null ? (e.won ? ' · 我方胜利' : ' · 我方落败') : (e.custom ? ' · 自定义' : ''));
-  const base = e.rel === 'same' ? '队友' : e.rel === 'opp' ? '敌人' : null;
-  if (!base) return '未知';
+  if (e.rel === 'spec') return I18N.t('inv.rel.spec') + (e.won != null ? (e.won ? I18N.t('inv.rel.specWin') : I18N.t('inv.rel.specLoss')) : (e.custom ? I18N.t('inv.rel.custom') : ''));
+  const base = e.rel === 'same' ? I18N.t('inv.rel.same') : e.rel === 'opp' ? I18N.t('inv.rel.opp') : null;
+  if (!base) return I18N.t('common.unknown');
   if (e.won != null) {
-    if (e.rel === 'same') return base + (e.won ? ' · 一起胜利' : ' · 一起落败');
-    return base + (e.won ? ' · 我方胜利' : ' · 对方胜利');
+    if (e.rel === 'same') return base + (e.won ? I18N.t('inv.rel.sameWin') : I18N.t('inv.rel.sameLoss'));
+    return base + (e.won ? I18N.t('inv.rel.oppWin') : I18N.t('inv.rel.oppLoss'));
   }
-  return base + (e.custom ? ' · 自定义' : '');
+  return base + (e.custom ? I18N.t('inv.rel.custom') : '');
 }
 function openInvestigate(id, name) {
   invId = id; invName = name || id;
@@ -1081,10 +1081,10 @@ function openInvestigate(id, name) {
   $('invName').textContent = invName;
   $('invId').textContent = 'ID ' + id;
   $('invBanBadge').classList.add('hidden');
-  $('invStats').innerHTML = '<div class="inv-stat"><b>…</b><span>载入中</span></div>';
-  $('invEncounters').innerHTML = '<span class="dim">载入中…</span>';
-  $('invNames').innerHTML = '<span class="dim">载入中…</span>';
-  $('invInfo').textContent = '载入中…';
+  $('invStats').innerHTML = '<div class="inv-stat"><b>…</b><span>' + I18N.t('loading.detail') + '</span></div>';
+  $('invEncounters').innerHTML = '<span class="dim">' + I18N.t('loading.detail') + '</span>';
+  $('invNames').innerHTML = '<span class="dim">' + I18N.t('loading.detail') + '</span>';
+  $('invInfo').textContent = I18N.t('loading.detail');
   const content = $('invContent');
   if (content) content.classList.add('hidden');
   clearInvGameTimer();
@@ -1105,7 +1105,7 @@ async function loadInvestigate(id) {
     clearInvGameTimer();
     stopRadarLoading();
     showInvContent();
-    $('invStats').innerHTML = '<div class="loss">加载失败：' + esc(e.message) + '</div>';
+    $('invStats').innerHTML = '<div class="loss">' + esc(I18N.t('inv.loadFail', { msg: e.message })) + '</div>';
   }
 }
 function renderInvestigate(p) {
@@ -1117,68 +1117,68 @@ function renderInvestigate(p) {
   const ban = $('invBanBadge');
   if (p.banned) {
     ban.classList.remove('hidden');
-    ban.textContent = '🛡 已封禁' + (p.banInfo && p.banInfo.firstSeenAt ? '（' + fmtTime(p.banInfo.firstSeenAt) + ' 首次发现）' : '');
+    ban.textContent = I18N.t('inv.banned') + (p.banInfo && p.banInfo.firstSeenAt ? I18N.t('inv.bannedSince', { t: fmtTime(p.banInfo.firstSeenAt) }) : '');
   } else {
     ban.classList.add('hidden');
   }
   const st = p.stats || {};
   $('invStats').innerHTML = `
-    <div class="inv-stat"><b>${st.count ?? 0}</b><span>相遇次数</span></div>
-    <div class="inv-stat"><b>${st.sameTeam ?? 0}</b><span>队友</span></div>
-    <div class="inv-stat"><b>${st.oppTeam ?? 0}</b><span>敌人</span></div>
-    <div class="inv-stat"><b>${st.sameWins ?? 0} / ${st.sameLosses ?? 0}</b><span>队友胜/负</span></div>
-    <div class="inv-stat"><b>${st.oppWins ?? 0} / ${st.oppLosses ?? 0}</b><span>敌人胜/负</span></div>
-    <div class="inv-stat"><b>${st.spectator ?? 0}</b><span>观战</span></div>
-    <div class="inv-stat"><b>${st.custom ?? 0}</b><span>自定义</span></div>
-    <div class="inv-stat"><b>${st.lastAt ? fmtTime(st.lastAt) : '-'}</b><span>最近相遇</span></div>`;
+    <div class="inv-stat"><b>${st.count ?? 0}</b><span>${I18N.t('inv.meetCount')}</span></div>
+    <div class="inv-stat"><b>${st.sameTeam ?? 0}</b><span>${I18N.t('inv.sameTeam')}</span></div>
+    <div class="inv-stat"><b>${st.oppTeam ?? 0}</b><span>${I18N.t('inv.oppTeam')}</span></div>
+    <div class="inv-stat"><b>${st.sameWins ?? 0} / ${st.sameLosses ?? 0}</b><span>${I18N.t('inv.sameWl')}</span></div>
+    <div class="inv-stat"><b>${st.oppWins ?? 0} / ${st.oppLosses ?? 0}</b><span>${I18N.t('inv.oppWl')}</span></div>
+    <div class="inv-stat"><b>${st.spectator ?? 0}</b><span>${I18N.t('common.spectate')}</span></div>
+    <div class="inv-stat"><b>${st.custom ?? 0}</b><span>${I18N.t('common.custom')}</span></div>
+    <div class="inv-stat"><b>${st.lastAt ? fmtTime(st.lastAt) : '-'}</b><span>${I18N.t('inv.lastMeet')}</span></div>`;
   const eloHtml = p.latestElo != null
-    ? (() => { const src = p.latestEloMatch || {}; return `<b class="elo">最新 ELO ${p.latestElo}</b><span class="dim">（${src.fid || '-'}${src.map ? ' · ' + esc(src.map) : ''}${src.endTime ? ' · ' + fmtTime(src.endTime) : ''}）</span>`; })()
-    : '<span class="dim">暂无排位数据（最近都是自定义/未收录局）</span>';
+    ? (() => { const src = p.latestEloMatch || {}; return `<b class="elo">${I18N.t('inv.latestElo', { v: p.latestElo })}</b><span class="dim">（${src.fid || '-'}${src.map ? ' · ' + esc(src.map) : ''}${src.endTime ? ' · ' + fmtTime(src.endTime) : ''}）</span>`; })()
+    : '<span class="dim">' + I18N.t('inv.noRanked') + '</span>';
 ﻿  const rec = p.recentMatches || [];
   $('invRecent').innerHTML = rec.length
     ? rec.slice(0, 10).map((m) => `
-      <div class="inv-item"${m.fid && /^\d+$/.test(m.fid) ? ` data-link="${MATCH_URL(m.fid)}" title="右键：在 BATrace 打开"` : ''}>
-        <span class="${m.won == null ? 'unk' : m.won ? 'win' : 'loss'}">${m.won != null ? (m.won ? '胜' : '负') : (m.custom ? '自定义' : '未知')}</span>
-        ${m.custom ? '<span class="mode-tag custom">自定义</span>' : '<span class="mode-tag ranked">排位</span>'}
+      <div class="inv-item"${m.fid && /^\d+$/.test(m.fid) ? ` data-link="${MATCH_URL(m.fid)}" title="${I18N.t('common.rightClickBatrace')}"` : ''}>
+        <span class="${m.won == null ? 'unk' : m.won ? 'win' : 'loss'}">${m.won != null ? (m.won ? I18N.t('common.win') : I18N.t('common.loss')) : (m.custom ? I18N.t('common.custom') : I18N.t('common.unknown'))}</span>
+        ${m.custom ? '<span class="mode-tag custom">' + I18N.t('common.custom') + '</span>' : '<span class="mode-tag ranked">' + I18N.t('common.ranked') + '</span>'}
         <span class="dim">${m.fid}</span>
-        <span>${esc(m.map || '未知地图')}</span>
+        <span>${esc(m.map || I18N.t('common.unknownMap'))}</span>
         <span class="dim">${m.endTime ? fmtTime(m.endTime) : ''}</span>
         ${m.eloDelta != null ? `<span class="dim">${fmtDelta(m.eloDelta)}</span>` : ''}
       </div>`).join('')
-    : '<span class="dim">无近期对局</span>';
+    : '<span class="dim">' + I18N.t('inv.noRecent') + '</span>';
 
   const enc = p.encounters || [];
   $('invEncounters').innerHTML = enc.length
     ? enc.slice(0, 50).map((e) => `
-      <div class="inv-item"${e.fid && /^\d+$/.test(e.fid) ? ` data-link="${MATCH_URL(e.fid)}" title="右键：在 BATrace 打开"` : ''}>
+      <div class="inv-item"${e.fid && /^\d+$/.test(e.fid) ? ` data-link="${MATCH_URL(e.fid)}" title="${I18N.t('common.rightClickBatrace')}"` : ''}>
         <span class="${e.rel === 'spec' ? 'spec' : (e.won == null ? 'unk' : e.won ? 'win' : 'loss')}">${encounterRelLabel(e)}</span>
-        ${e.custom === true ? '<span class="mode-tag custom">自定义</span>' : e.custom === false ? '<span class="mode-tag ranked">排位</span>' : ''}
+        ${e.custom === true ? '<span class="mode-tag custom">' + I18N.t('common.custom') + '</span>' : e.custom === false ? '<span class="mode-tag ranked">' + I18N.t('common.ranked') + '</span>' : ''}
         <span class="dim">${e.fid}</span>
-        <span>${esc(e.map || '未知地图')}</span>
+        <span>${esc(e.map || I18N.t('common.unknownMap'))}</span>
         <span class="dim">${e.at ? fmtTime(e.at) : ''}</span>
       </div>`).join('')
-    : '<span class="dim">暂无相遇记录（开启「每小时同步我的对局记录」后会回填）。</span>';
+    : '<span class="dim">' + I18N.t('inv.noEncounters') + '</span>';
   const nh = p.nameHistory || [];
   $('invNames').innerHTML = nh.length
     ? nh.slice(0, 20).map((n) => `
       <div class="inv-item"><b>${esc(n.name)}</b><span class="dim">${fmtTime(n.firstSeen)} → ${fmtTime(n.lastSeen)}</span></div>`).join('')
-    : '<span class="dim">暂无改名记录</span>';
+    : '<span class="dim">' + I18N.t('inv.noNames') + '</span>';
   const info = p.info;
   const snap = p.localSnapshot || null;
   let infoHtml = eloHtml;
   if (info) {
     infoHtml = eloHtml + '<br>' +
       (info.kd != null ? ` <span>K/D ${info.kd}</span>` : '') +
-      (info.winRate != null ? ` <span>胜率 ${info.winRate}%</span>` : '') +
-      (info.category ? ` <span>偏好 ${esc(catLabel(info.category))}</span>` : '') +
-      (info.topUnits ? ` <span>最爱 ${esc(info.topUnits)}</span>` : '');
+      (info.winRate != null ? ` <span>${I18N.t('common.winRate', { v: info.winRate })}</span>` : '') +
+      (info.category ? ` <span>${I18N.t('inv.pref', { v: esc(catLabel(info.category)) })}</span>` : '') +
+      (info.topUnits ? ` <span>${I18N.t('inv.fav', { v: esc(info.topUnits) })}</span>` : '');
   } else if (snap) {
     const bits = [];
     if (snap.elo != null) bits.push('ELO <span class="elo">' + Math.round(snap.elo) + '</span>');
-    if (snap.winRate != null) bits.push('胜率 ' + snap.winRate + '%');
-    if (snap.matchCount != null) bits.push('样本 ' + snap.matchCount);
-    if (snap.category) bits.push('偏好 ' + esc(catLabel(snap.category)));
-    infoHtml = eloHtml + '<br><span class="dim">本地快照 · ' + fmtTime(snap.at) + '：</span> ' + (bits.length ? bits.join(' ') : '暂无');
+    if (snap.winRate != null) bits.push(I18N.t('common.winRate', { v: snap.winRate }));
+    if (snap.matchCount != null) bits.push(I18N.t('common.sample', { n: snap.matchCount }));
+    if (snap.category) bits.push(I18N.t('inv.pref', { v: esc(catLabel(snap.category)) }));
+    infoHtml = eloHtml + '<br><span class="dim">' + I18N.t('inv.localSnapshot', { t: fmtTime(snap.at) }) + '</span> ' + (bits.length ? bits.join(' ') : I18N.t('common.noneShort'));
   }
   $('invInfo').innerHTML = infoHtml;
 }
@@ -1191,20 +1191,20 @@ function setBanCardVisible(visible) {
 function renderBans(d) {
   const list = (d && d.list) || [];
   const info = $('banSyncInfo');
-  if (info) info.textContent = (d && d.lastSync) ? ('上次同步 ' + fmtTime(d.lastSync) + '｜共 ' + list.length + ' 人') : '尚未同步';
+  if (info) info.textContent = (d && d.lastSync) ? I18N.t('ban.lastSync', { t: fmtTime(d.lastSync), n: list.length }) : I18N.t('ban.notSynced');
   const el = $('banList');
   if (!el) return;
   if (!list.length) {
-    el.innerHTML = '<span class="dim">暂无封禁记录。开启「封禁监控」后每小时自动检查，也可点「同步」立即检查。</span>';
+    el.innerHTML = '<span class="dim">' + esc(I18N.t('ban.empty')) + '</span>';
     return;
   }
   el.innerHTML = list.slice(0, 100).map((b) => `
-    <div class="ban-item" data-id="${b.id}" data-name="${esc(b.name || '')}" data-link="${PLAYER_URL(b.id)}" title="右键：调查 / 在 BATrace 打开">
-      <b>${esc(b.name || '未知')}</b>
+    <div class="ban-item" data-id="${b.id}" data-name="${esc(b.name || '')}" data-link="${PLAYER_URL(b.id)}" title="${I18N.t('inv.rightClickBatrace')}">
+      <b>${esc(b.name || I18N.t('common.unknown'))}</b>
       <span class="dim">ID ${esc(b.id)}</span>
       ${b.rating != null ? `<span class="dim">ELO ${Math.round(b.rating)}</span>` : ''}
       <span class="dim">${fmtTime(b.firstSeenAt)}</span>
-      ${b.encountered ? '<span class="ban-tag met">你遇到过</span>' : ''}
+      ${b.encountered ? '<span class="ban-tag met">' + I18N.t('ban.met') + '</span>' : ''}
     </div>`).join('');
 }
 
@@ -1214,11 +1214,11 @@ function renderBanAlert(d) {
   if (!list.length) return;
   const el = $('banAlertList');
   el.innerHTML = list.map((b) => `
-    <div class="ban-item" data-id="${b.id}" data-name="${esc(b.name || '')}" data-link="${PLAYER_URL(b.id)}" title="右键：调查羁绊 / 在 BATrace 打开">
-      <b>${esc(b.name || '未知')}</b>
+    <div class="ban-item" data-id="${b.id}" data-name="${esc(b.name || '')}" data-link="${PLAYER_URL(b.id)}" title="${I18N.t('inv.rightClickInv')}">
+      <b>${esc(b.name || I18N.t('common.unknown'))}</b>
       <span class="dim">ID ${esc(b.id)}</span>
       ${b.rating != null ? `<span class="dim">ELO ${Math.round(b.rating)}</span>` : ''}
-      <span class="ban-tag met">你遇到过</span>
+      <span class="ban-tag met">${I18N.t('ban.met')}</span>
     </div>`).join('');
   $('banAlertModal').classList.remove('hidden');
 }
@@ -1231,7 +1231,7 @@ function renderReplayStatus(s) {
   if (!s) { el.textContent = ''; return; }
   const rec = s.recording || {};
   const bits = [];
-  if (rec && rec.active) bits.push('🔴 正在录制' + (rec.current && rec.current.fid ? ' #' + rec.current.fid : ''));
+  if (rec && rec.active) bits.push(I18N.t('replay.recording') + (rec.current && rec.current.fid ? ' #' + rec.current.fid : ''));
   el.textContent = bits.join(' ｜ ');
 }
 // 录制小预览（对局录像模块内置，录制时每秒刷新，确认录的是哪块屏）
@@ -1242,7 +1242,7 @@ function setReplayPreview(active, status) {
   if (!active) return;
   const cur = (status && status.current) || (status && status.recording && status.recording.current) || null;
   const lab = $('replayPreviewLabel');
-  if (lab) lab.textContent = '🔴 正在录制' + (cur && cur.sourceId ? ' · ' + cur.sourceId : '');
+  if (lab) lab.textContent = I18N.t('replay.recording') + (cur && cur.sourceId ? ' · ' + cur.sourceId : '');
 }
 function updateReplayFids(list, status) {
   replayFids = new Set();
@@ -1250,31 +1250,21 @@ function updateReplayFids(list, status) {
   if (archiveList && archiveList.length) renderArchive(archiveList); // 刷新对局档案的 📹 标记
 }
 
-async function refreshReplayList(fid, opts) {
-  const el = $('replayList');
-  if (!el) return;
-  const q = (fid != null && fid !== '') ? String(fid) : '';
-  if (!(opts && opts.silent)) el.innerHTML = '<span class="dim">载入录像列表…</span>'; // silent 时不清空，避免上传中列表闪烁
+// 轻量刷新：只更新「有录像的对局 ID」集合（驱动对局档案 📹 标记），不再渲染卡片列表
+async function refreshReplayFids() {
   try {
     const lr = await BA.listLocalReplays().catch(() => null);
-    const localList = (lr && lr.list) || [];
-    const list = [];
-    for (const it of localList) { if (q && String(it.fid) !== String(q)) continue; list.push({ ...it, source: 'local' }); }
-    renderReplayList(list);
-    updateReplayFids(list);
-  } catch (e) {
-    el.innerHTML = '<div class="replay-error">载入失败：' + esc(e.message) + '</div>';
-    updateReplayFids([]);
-  }
+    updateReplayFids((lr && lr.list) || []);
+  } catch (e) { updateReplayFids([]); }
 }
 function replayTeamTag(t) {
-  if (t === 0) return '<span class="r-team alpha">A 队</span>';
-  if (t === 1) return '<span class="r-team bravo">B 队</span>';
-  if (t === 100) return '<span class="r-team spec">观战</span>';
+  if (t === 0) return '<span class="r-team alpha">' + I18N.t('team.a') + '</span>';
+  if (t === 1) return '<span class="r-team bravo">' + I18N.t('team.b') + '</span>';
+  if (t === 100) return '<span class="r-team spec">' + I18N.t('common.spectate') + '</span>';
   const team = String(t || '').toLowerCase();
-  if (team === 'alpha') return '<span class="r-team alpha">A 队</span>';
-  if (team === 'bravo') return '<span class="r-team bravo">B 队</span>';
-  if (team === 'spectators' || team === 'spec') return '<span class="r-team spec">观战</span>';
+  if (team === 'alpha') return '<span class="r-team alpha">' + I18N.t('team.a') + '</span>';
+  if (team === 'bravo') return '<span class="r-team bravo">' + I18N.t('team.b') + '</span>';
+  if (team === 'spectators' || team === 'spec') return '<span class="r-team spec">' + I18N.t('common.spectate') + '</span>';
   return '';
 }
 function fmtSize(n) {
@@ -1283,105 +1273,10 @@ function fmtSize(n) {
   if (m >= 1) return m.toFixed(1) + ' MB';
   return Math.round(n / 1024) + ' KB';
 }
-function renderReplayList(list) {
-  const el = $('replayList');
-  if (!el) return;
-  if (!list.length) { el.innerHTML = '<div class="replay-empty">暂无录像。开启「自动录制」后打一局，局结束会自动保存到本地。</div>'; return; }
-  const byFid = {};
-  for (const it of list) {
-    const k = String(it.fid || '未知');
-    (byFid[k] = byFid[k] || []).push(it);
-  }
-  // 按每组里最新一条录像的时间倒序（不能按对局ID数字排：测试录像ID是负数，数字排序会错乱）
-  const groupTime = (items) => items.reduce((m, it) => Math.max(m, Number(it.createdAt || it.endTime) || 0), 0);
-  const fids = Object.keys(byFid).sort((a, b) => groupTime(byFid[b]) - groupTime(byFid[a]));
-  el.innerHTML = fids.map((fid) => {
-    const items = byFid[fid];
-    const first = items[0] || {};
-    const rows = mergeReplayRows(items);
-    return `
-      <div class="replay-group">
-        <div class="replay-group-title">对局 ${esc(fid)} <span class="dim">${esc(first.map || '')} · ${fmtTime(first.createdAt || first.endTime)}</span></div>
-        ${rows.map((r) => replayRowHtml(r)).join('')}
-      </div>`;
-  }).join('');
-  bindReplayRows(el);
-}
-
-// 每个本地文件一行（无云端；同一对局多份本地文件各自成行）
-function mergeReplayRows(items) {
-  return (items || []).map((it) => ({
-    fid: it.fid,
-    name: it.uploaderName || '',
-    map: it.map || '',
-    team: it.team != null && it.team !== '' ? it.team : it.teamId,
-    teamId: it.teamId,
-    durationSec: it.durationSec,
-    size: it.size,
-    createdAt: it.createdAt || it.endTime,
-    source: 'local',
-    localId: it.id || '',
-    cloudId: '',
-    video: ''
-  }));
-}
-
-function replayRowHtml(r) {
-  const negative = String(r.fid || '').startsWith('-');
-  const badge = negative ? '<span class="r-src test">🧪 测试</span>' : '<span class="r-src local">📁 本地</span>';
-  return `
-    <div class="replay-row" data-fid="${esc(r.fid)}" data-name="${esc(r.name)}" data-map="${esc(r.map)}" data-source="local" data-local="${esc(r.localId)}" data-cloud="" data-video="" title="右键：打开位置 / 对局详情 / BATrace / 删除">
-      <span class="r-name">${esc(r.name || '未知')}</span>
-      ${badge}
-      ${replayTeamTag(r.team != null && r.team !== '' ? r.team : r.teamId)}
-      <span class="dim">${r.durationSec ? fmtDuration(r.durationSec) : '-'}</span>
-      <span class="dim">${fmtSize(r.size)}</span>
-      <span class="dim">${fmtTime(r.createdAt)}</span>
-      <button class="btn btn-ghost r-play">▶ 播放</button>
-      <button class="r-del" title="删除这条录像">🗑</button>
-    </div>`;
-}
-
-function bindReplayRows(el) {
-  el.querySelectorAll('.replay-row').forEach((row) => {
-    const localId = row.dataset.local;
-    row.querySelector('.r-play').addEventListener('click', async (e) => {
-      e.stopPropagation();
-      if (localId) {
-        try {
-          const r = await BA.readLocalReplay(localId);
-          if (r && r.ok) {
-            const blob = new Blob([r.data], { type: 'video/webm' });
-            const url = URL.createObjectURL(blob);
-            openReplayPlayer({ id: localId, videoUrl: url, fid: row.dataset.fid, name: row.dataset.name, map: row.dataset.map, isBlob: true });
-          } else { setStatus(((r && r.message) || '本地文件读取失败'), false); }
-        } catch (err) { setStatus('播放失败：' + err.message, false); }
-      }
-    });
-    row.querySelector('.r-del').addEventListener('click', async (e) => {
-      e.stopPropagation();
-      await deleteReplayRow(row);
-    });
-  });
-}
-
-async function deleteReplayRow(row) {
-  const localId = row.dataset.local;
-  if (!localId) return;
-  const ok = await askConfirm('确定删除这条本地录像吗？');
-  if (!ok) return;
-  try {
-    const r = await BA.deleteLocalReplay(localId);
-    setStatus((r && r.message) || '已删除', !!(r && r.ok));
-    refreshReplayList($('replaySearch').value.trim());
-  } catch (err) { setStatus('删除失败：' + err.message, false); }
-}
-
-
 let replayBlobUrl = null;
 function openReplayPlayer(item) {
   if (replayBlobUrl) { URL.revokeObjectURL(replayBlobUrl); replayBlobUrl = null; }
-  $('replayPlayTitle').textContent = '对局录像 #' + (item.fid || '');
+  $('replayPlayTitle').textContent = I18N.t('replay.playTitle', { fid: item.fid || '' });
   $('replayPlayMeta').textContent = (item.name ? esc(item.name) + ' · ' : '') + esc(item.map || '');
   const v = $('replayVideo');
   v.src = item.videoUrl || '';
@@ -1402,7 +1297,7 @@ function pickDisplay(list) {
     if (!wrap) { resolve(null); return; }
     wrap.innerHTML = (list || []).map((d) => `
       <div class="display-thumb" data-id="${esc(d.id)}">
-        ${d.thumb ? `<img src="${d.thumb}" alt=""/>` : '<div class="dim">（无缩略图）</div>'}
+        ${d.thumb ? `<img src="${d.thumb}" alt=""/>` : '<div class="dim">' + I18N.t('common.noThumb') + '</div>'}
         <div class="dim">${esc(d.label || d.id)}</div>
       </div>`).join('');
     $('displayPickerModal').classList.remove('hidden');
@@ -1423,6 +1318,161 @@ function closeReplayPlayer() {
   const rp = $('replayModal');
   if (rp) rp.classList.add('hidden');
 }
+// ---------- 录像设置弹窗（分辨率/帧数/码率/声音/保存目录） ----------
+const recCore = (typeof window !== 'undefined' && window.recCore) ? window.recCore : null;
+let recSaveDirCache = '';
+let recOriginalDir = '';
+let recOriginalCount = 0;
+let recMoved = false;
+function recEstimate(fps, bitrateMbps, audioOn) {
+  if (recCore && recCore.estSize45) return recCore.estSize45(fps, bitrateMbps, audioOn);
+  const bit = Math.min(10, Math.max(3, Math.round(Number(bitrateMbps) || 5)));
+  return { mb: Math.round(bit / 8 * 2700 * 0.5), audioMb: audioOn ? 43 : 0, bps: bit };
+}
+function fmtMb(mb) { return mb >= 1024 ? (mb / 1024).toFixed(2) + ' GB' : Math.round(mb) + ' MB'; }
+const REC_QUALITIES = [240, 360, 480, 720, 1080];
+function recSnapQuality(v) {
+  const n = Number(v);
+  let best = 720, bd = Infinity;
+  for (const q of REC_QUALITIES) { const d = Math.abs(q - n); if (d < bd) { bd = d; best = q; } }
+  return best;
+}
+function recRangeVal(id, def, snap) {
+  const el = $(id);
+  if (!el) return def;
+  let v = Number(el.value);
+  if (snap) v = recSnapQuality(v);
+  return v;
+}
+function recSetRange(id, val, snap) {
+  const el = $(id);
+  if (!el) return;
+  let v = Number(val);
+  if (snap) v = recSnapQuality(v);
+  el.value = String(v);
+}
+function recSliderLabels() {
+  const q = recRangeVal('recQualityRange', 720, true);
+  const fps = recRangeVal('recFpsRange', 30, false);
+  const bit = recRangeVal('recBitrateRange', 5, false);
+  const qv = $('recQualityVal'); if (qv) qv.textContent = q + 'p';
+  const fv = $('recFpsVal'); if (fv) fv.textContent = fps + ' fps';
+  const bv = $('recBitrateVal'); if (bv) bv.textContent = bit + ' Mbps';
+}
+function updateRecEstimate() {
+  recSliderLabels();
+  const fps = recRangeVal('recFpsRange', 30, false);
+  const bit = recRangeVal('recBitrateRange', 5, false);
+  const audioOn = $('recAudio') ? $('recAudio').value !== 'off' : false;
+  const est = recEstimate(fps, bit, audioOn);
+  const el = $('recEstSize');
+  if (el) el.textContent = I18N.t('replay.estSize', { size: fmtMb(est.mb), audio: est.audioMb ? I18N.t('replay.audioPlus', { mb: fmtMb(est.audioMb) }) : '' }) + ' · ' + I18N.t('replay.estSmaller');
+  const note = $('recEstNote');
+  if (note) note.textContent = I18N.t('replay.estHint');
+}
+async function openRecSettings() {
+  const cfg = await BA.getConfig();
+  const dirInfo = await BA.getReplayDirInfo().catch(() => null);
+  recOriginalDir = (dirInfo && dirInfo.dir) || '';
+  recOriginalCount = (dirInfo && dirInfo.count) || 0;
+  recMoved = false;
+  const sel = $('recDisplay');
+  if (sel) {
+    const list = await BA.listDisplays().catch(() => []);
+    const cur = cfg.replayDisplayId || '';
+    sel.innerHTML = list.map((d) => '<option value="' + esc(d.id) + '"' + (d.id === cur ? ' selected' : '') + '>' + esc(d.label || d.id) + '</option>').join('');
+    if (!sel.value && list.length) sel.value = list[0].id;
+  }
+  recSetRange('recQualityRange', cfg.replayQuality || 720, true);
+  recSetRange('recFpsRange', cfg.replayFps || 30, false);
+  recSetRange('recBitrateRange', cfg.replayBitrateMbps || 5, false);
+  const au = $('recAudio'); if (au) au.value = cfg.replayAudio === 'off' ? 'off' : 'default';
+  recSaveDirCache = cfg.replaySaveDir || '';
+  const dirEl = $('recSaveDir');
+  if (dirEl) dirEl.textContent = recSaveDirCache || recOriginalDir || I18N.t('replay.defaultDir');
+  const msg = $('recSettingsMsg'); if (msg) msg.textContent = '';
+  updateRecEstimate();
+  const m = $('recSettingsModal'); if (m) m.classList.remove('hidden');
+}
+function closeRecSettings() {
+  const m = $('recSettingsModal'); if (m) m.classList.add('hidden');
+}
+async function saveRecSettings() {
+  const quality = recRangeVal('recQualityRange', 720, true);
+  const fps = recRangeVal('recFpsRange', 30, false);
+  const bitrate = recRangeVal('recBitrateRange', 5, false);
+  const audio = $('recAudio') ? $('recAudio').value : 'default';
+  const displayId = $('recDisplay') ? $('recDisplay').value : '';
+  const newDir = recSaveDirCache || recOriginalDir;
+  await BA.setConfig({ replayQuality: quality, replayFps: fps, replayBitrateMbps: bitrate, replayAudio: audio, replayDisplayId: displayId, replaySaveDir: recSaveDirCache });
+  renderReplayNote({ replayQuality: quality, replayFps: fps, replayBitrateMbps: bitrate, replayAudio: audio });
+  if (recOriginalDir && newDir && newDir !== recOriginalDir && recOriginalCount > 0 && !recMoved) {
+    const ok = await askConfirm(I18N.t('replay.migrateConfirm', { from: recOriginalDir, to: newDir }));
+    if (ok) {
+      try {
+        const mv = await BA.moveReplays(recOriginalDir, newDir);
+        recMoved = true;
+        recOriginalDir = newDir;
+        recOriginalCount = 0;
+        setStatus((mv && mv.ok) ? I18N.t('status.migrated', { n: (mv && mv.moved) || 0 }) : I18N.t('status.migrateFail', { msg: (mv && mv.message) || I18N.t('common.unknown') }), !!(mv && mv.ok));
+      } catch (err) { setStatus(I18N.t('status.migrateFail', { msg: err.message }), false); }
+    }
+  }
+  refreshReplayFids();
+  renderReplayList();
+  closeRecSettings();
+  setStatus(I18N.t('status.recSettingsSaved'), true);
+}
+function renderReplayNote(cfg) {
+  const el = $('replayNote');
+  if (!el) return;
+  const q = REC_QUALITIES.includes(Number(cfg.replayQuality)) ? Number(cfg.replayQuality) : 720;
+  const fps = Math.min(60, Math.max(30, Math.round(Number(cfg.replayFps) || 30)));
+  const bit = Math.min(10, Math.max(3, Math.round(Number(cfg.replayBitrateMbps) || 5)));
+  const est = recEstimate(fps, bit, cfg.replayAudio !== 'off');
+  el.textContent = I18N.t('replay.note', { q: q, fps: fps, bit: bit, est: fmtMb(est.mb) });
+}
+
+// 主界面行车记录仪卡片：按时间倒序的录像列表（播放 / 删除 / 打开位置 / 清理 30 天前）
+async function renderReplayList() {
+  const el = $('replayList');
+  const info = $('replayListInfo');
+  try {
+    const r = await BA.listLocalReplays();
+    const list = (r && r.list) || [];
+    let total = 0;
+    for (const it of list) total += it.size || 0;
+    if (info) info.textContent = I18N.t('replay.listInfo', { n: list.length, size: fmtSize(total) });
+    if (!el) return;
+    if (!list.length) { el.innerHTML = '<div class="replay-empty dim">' + esc(I18N.t('replay.empty')) + '</div>'; return; }
+    el.innerHTML = list.slice(0, 100).map((it) => `
+      <div class="replay-row" data-key="${esc(it.id)}" data-fid="${esc(it.fid || '')}">
+        <span class="r-name">${esc(it.map || I18N.t('common.unknownMap'))}</span>
+        <span class="dim">#${esc(it.fid)}</span>
+        <span class="dim">${fmtTime(it.createdAt)}</span>
+        <span class="dim">${fmtSize(it.size)}</span>
+        <button type="button" class="btn btn-ghost r-play" data-key="${esc(it.id)}" title="${I18N.t('common.playReplay')}">${I18N.t('common.play')}</button>
+        <button type="button" class="r-del" data-key="${esc(it.id)}" title="${I18N.t('common.deleteReplayRow')}">🗑</button>
+      </div>`).join('');
+    el.querySelectorAll('.r-play').forEach((b) => b.addEventListener('click', () => {
+      const it = list.find((x) => String(x.id) === String(b.dataset.key));
+      if (it) playReplayItem({ local: it, fid: it.fid, name: it.uploaderName, map: it.map });
+    }));
+    el.querySelectorAll('.r-del').forEach((b) => b.addEventListener('click', async () => {
+      const ok = await askConfirm(I18N.t('confirm.deleteReplay'));
+      if (!ok) return;
+      try {
+        await BA.deleteLocalReplay(b.dataset.key);
+        setStatus(I18N.t('status.deleted'), true);
+        renderReplayList();
+        refreshReplayFids();
+      } catch (e) { setStatus(I18N.t('status.deleteFailed', { msg: e.message }), false); }
+    }));
+  } catch (e) {
+    if (el) el.innerHTML = '<div class="replay-error">' + esc(I18N.t('replay.loadFail', { msg: e.message })) + '</div>';
+  }
+}
+
 // 设置内：本地录像管理
 async function refreshLocalReplayList() {
   const el = $('localReplayList');
@@ -1432,29 +1482,30 @@ async function refreshLocalReplayList() {
     const list = (r && r.list) || [];
     let total = 0;
     for (const it of list) total += it.size || 0;
-    if (info) info.textContent = '共 ' + list.length + ' 条，' + fmtSize(total);
+    if (info) info.textContent = I18N.t('replay.countInfo', { n: list.length, size: fmtSize(total) });
     if (!el) return;
-    if (!list.length) { el.innerHTML = '<span class="dim">暂无本地录像。</span>'; return; }
+    if (!list.length) { el.innerHTML = '<span class="dim">' + esc(I18N.t('replay.emptyLocal')) + '</span>'; return; }
     el.innerHTML = list.slice(0, 100).map((it) => `
       <div class="inv-item local-replay-item">
         <span class="dim">${esc(it.fid)}</span>
-        <span>${esc(it.map || '未知地图')}</span>
+        <span>${esc(it.map || I18N.t('common.unknownMap'))}</span>
         <span class="dim">${fmtTime(it.createdAt)}</span>
         <span class="dim">${fmtSize(it.size)}</span>
-        <button class="r-del" data-key="${esc(it.id)}" title="删除这条本地录像">🗑</button>
+        <button class="r-del" data-key="${esc(it.id)}" title="${I18N.t('common.deleteLocalReplay')}">🗑</button>
       </div>`).join('');
     el.querySelectorAll('.r-del').forEach((b) => b.addEventListener('click', async () => {
-      const ok = await askConfirm('确定删除这条本地录像吗？');
+      const ok = await askConfirm(I18N.t('replay.deleteConfirm'));
       if (!ok) return;
       try {
         const r = await BA.deleteLocalReplay(b.dataset.key);
-        $('localReplayResult').textContent = (r && r.message) || '已删除';
+        $('localReplayResult').textContent = (r && r.message) || I18N.t('common.deleted');
         refreshLocalReplayList();
-        refreshReplayList($('replaySearch').value.trim());
-      } catch (e) { $('localReplayResult').textContent = '删除失败：' + e.message; }
+        refreshReplayFids();
+        renderReplayList();
+      } catch (e) { $('localReplayResult').textContent = I18N.t('status.deleteFailed', { msg: e.message }); }
     }));
   } catch (e) {
-    if (el) el.innerHTML = '<span class="dim">加载失败：' + esc(e.message) + '</span>';
+    if (el) el.innerHTML = '<span class="dim">' + esc(I18N.t('replay.loadFail', { msg: e.message })) + '</span>';
   }
 }
 
@@ -1464,25 +1515,25 @@ async function toggleBanCheaters() {
   const btn = $('btnBanCheaters');
   if (banView === 'all') {
     banView = 'met';
-    if (btn) btn.textContent = '🔍 全部封禁';
+    if (btn) btn.textContent = I18N.t('ban.allBtn');
     const r = await BA.getCheaters();
     renderCheaters((r && r.list) || []);
   } else {
     banView = 'all';
-    if (btn) btn.textContent = '🔍 我遇到过的作弊者';
+    if (btn) btn.textContent = I18N.t('ban.cheatersBtn');
     BA.getBans().then(renderBans).catch(() => {});
   }
 }
 function renderCheaters(list) {
   const el = $('banList');
   if (!el) return;
-  if (!list.length) { el.innerHTML = '<span class="dim">还没有遇到过被封的玩家。</span>'; return; }
+  if (!list.length) { el.innerHTML = '<span class="dim">' + esc(I18N.t('ban.noCheaters')) + '</span>'; return; }
   el.innerHTML = list.map((c) => `
-    <div class="ban-item" data-id="${c.id}" data-name="${esc(c.name || '')}" data-link="${PLAYER_URL(c.id)}" data-matches="${encodeURIComponent(JSON.stringify(c.matches || []))}" title="左键：展开相遇对局；右键：调查羁绊 / BATrace">
-      <b>${esc(c.name || '未知')}</b>
+    <div class="ban-item" data-id="${c.id}" data-name="${esc(c.name || '')}" data-link="${PLAYER_URL(c.id)}" data-matches="${encodeURIComponent(JSON.stringify(c.matches || []))}" title="${I18N.t('ban.rowTitle')}">
+      <b>${esc(c.name || I18N.t('common.unknown'))}</b>
       <span class="dim">ID ${esc(c.id)}</span>
       ${c.rating != null ? `<span class="dim">ELO ${Math.round(c.rating)}</span>` : ''}
-      <span class="ban-tag met">遇到过 ${c.matchCount || 0} 局</span>
+      <span class="ban-tag met">${I18N.t('ban.metN', { n: c.matchCount || 0 })}</span>
     </div>`).join('');
   el.querySelectorAll('.ban-item[data-matches]').forEach((item) => {
     item.addEventListener('click', () => {
@@ -1494,13 +1545,13 @@ function renderCheaters(list) {
       div.className = 'cheater-matches inv-list';
       div.innerHTML = matches.length
         ? matches.map((m) => `
-          <div class="cheater-match" data-link="${MATCH_URL(m.fid)}" title="右键：在 BATrace 打开">
-            <span class="${m.localWon == null ? 'unk' : m.localWon ? 'win' : 'loss'}">${m.localWon == null ? (m.custom ? '自定义' : '未知') : m.localWon ? '胜' : '负'}</span>
-            <span>${esc(m.map || '未知地图')}</span>
+          <div class="cheater-match" data-link="${MATCH_URL(m.fid)}" title="${I18N.t('common.rightClickBatrace')}">
+            <span class="${m.localWon == null ? 'unk' : m.localWon ? 'win' : 'loss'}">${m.localWon == null ? (m.custom ? I18N.t('common.custom') : I18N.t('common.unknown')) : m.localWon ? I18N.t('common.win') : I18N.t('common.loss')}</span>
+            <span>${esc(m.map || I18N.t('common.unknownMap'))}</span>
             <span class="dim">${fmtTime(m.endTime)}</span>
             <span class="dim">${m.fid}</span>
           </div>`).join('')
-        : '<span class="dim">无对局记录</span>';
+        : '<span class="dim">' + I18N.t('ban.noMatches') + '</span>';
       item.appendChild(div);
     });
   });
@@ -1513,28 +1564,28 @@ async function refreshAccountList() {
   try {
     const r = await BA.listAccounts();
     const list = (r && r.list) || [];
-    if (!list.length) { el.innerHTML = '<span class="dim">暂无本机账号记录（打过对局后自动出现）。</span>'; return; }
+    if (!list.length) { el.innerHTML = '<span class="dim">' + esc(I18N.t('account.none')) + '</span>'; return; }
     el.innerHTML = list.map((a) =>
       '<div class="account-item">' +
-      '<b>' + esc(a.persona || a.name || ('账号 ' + a.id)) + '</b>' +
+      '<b>' + esc(a.persona || a.name || I18N.t('account.name', { id: a.id })) + '</b>' +
       '<span class="dim">ID ' + esc(a.id) + '</span>' +
-      '<span class="dim">' + a.matchCount + ' 场</span>' +
-      '<button class="btn btn-danger btn-xs" data-del="' + esc(a.id) + '">🗑 删除</button>' +
+      '<span class="dim">' + I18N.t('account.matchesN', { n: a.matchCount }) + '</span>' +
+      '<button class="btn btn-danger btn-xs" data-del="' + esc(a.id) + '">' + I18N.t('account.delete') + '</button>' +
       '</div>').join('');
     el.querySelectorAll('[data-del]').forEach((btn) => {
       btn.addEventListener('click', async () => {
         const id = btn.dataset.del;
-        const ok = await askConfirm('确定删除账号 ' + id + ' 的全部数据吗？\n将删除该账号的对局/相遇记录，并清理其卡组归档文件夹。此操作不可恢复。');
+        const ok = await askConfirm(I18N.t('account.confirmDelete', { id: id }));
         if (!ok) return;
         try {
           const r = await BA.deleteAccount(id);
-          setStatus((r && r.message) || '已删除', !!(r && r.ok));
+          setStatus((r && r.message) || I18N.t('common.deleted'), !!(r && r.ok));
           refreshAccountList();
-        } catch (e) { setStatus('删除失败：' + e.message, false); }
+        } catch (e) { setStatus(I18N.t('account.deleteFail', { msg: e.message }), false); }
       });
     });
   } catch (e) {
-    el.innerHTML = '<span class="dim">读取账号列表失败：' + esc(e.message) + '</span>';
+    el.innerHTML = '<span class="dim">' + esc(I18N.t('account.loadFail', { msg: e.message })) + '</span>';
   }
 }
 
@@ -1553,13 +1604,13 @@ async function runMaggot(stbid, name) {
   const area = $('maggotArea');
   $('maggotCalls').textContent = '';
   setMaggotBusy(true);
-  setMaggotProgress('查蛆指数中：拉取最近 12 场有效对局明细（冷查约 13 次调用，24 小时缓存后仅 1 次）…', 0);
+  setMaggotProgress(I18N.t('maggot.progressText'), 0);
   try {
     const r = await BA.maggotReport(stbid);
     if (r.error) { area.innerHTML = `<div class="loss">${esc(r.error)}</div>`; return; }
     renderMaggot(r, name);
   } catch (e) {
-    area.innerHTML = `<div class="loss">蛆查失败：${esc(e.message)}</div>`;
+    area.innerHTML = `<div class="loss">${esc(I18N.t('maggot.fail', { msg: e.message }))}</div>`;
   } finally {
     setMaggotBusy(false);
     hideMaggotProgress();
@@ -1587,13 +1638,13 @@ function hideMaggotProgress() {
 }
 
 function renderMaggot(r, name) {
-  const trendMap = { up: '🚀 最近变强', down: '📉 最近变蛆', flat: '➡️ 实力平稳' };
+  const trendMap = { up: I18N.t('maggot.trendUp'), down: I18N.t('maggot.trendDown'), flat: I18N.t('maggot.trendFlat') };
   const color = r.color === 'green' ? '#4ade80' : r.color === 'yellow' ? '#facc15' : '#f87171';
   const pct = r.maggotIndex != null ? Math.max(0, Math.min(100, ((r.maggotIndex - 1) / 9) * 100)) : 50;
   const rows = (r.rows || []).map((m) => `
     <tr>
-      <td class="${m.win ? 'win' : 'loss'}">${m.win ? '胜' : '负'}</td>
-      <td class="dim" data-link="${MATCH_URL(m.matchId)}" title="右键：在 BATrace 打开">${esc(m.matchId ?? '-')}</td>
+      <td class="${m.win ? 'win' : 'loss'}">${m.win ? I18N.t('common.win') : I18N.t('common.loss')}</td>
+      <td class="dim" data-link="${MATCH_URL(m.matchId)}" title="${I18N.t('common.rightClickBatrace')}">${esc(m.matchId ?? '-')}</td>
       <td>#${m.myRank}</td>
       <td>#${m.kRank}</td>
       <td>#${m.oRank}</td>
@@ -1601,7 +1652,7 @@ function renderMaggot(r, name) {
       <td>#${m.lossRank}</td>
       <td>${fmtDelta(m.eloDelta)}</td>
     </tr>`).join('');
-  $('maggotCalls').textContent = `本次蛆查 API 调用 ${r.calls} 次`;
+  $('maggotCalls').textContent = I18N.t('maggot.calls', { n: r.calls });
   $('maggotArea').innerHTML = `
     <div class="maggot-panel">
       <div class="mg-head">
@@ -1611,26 +1662,26 @@ function renderMaggot(r, name) {
           <span class="mg-trend">${trendMap[r.trend] || ''}</span>
         </div>
         <div class="mg-meta">
-          <span class="mg-name" data-link="${PLAYER_URL(r.stbid)}" title="右键：在 BATrace 打开">${esc(name || r.stbid)}</span>
-          <span class="dim">12 局平均队内名次 #${r.avgRank}（1=队内最强）</span>
+          <span class="mg-name" data-link="${PLAYER_URL(r.stbid)}" title="${I18N.t('common.rightClickBatrace')}">${esc(name || r.stbid)}</span>
+          <span class="dim">${I18N.t('maggot.avgRank', { rank: r.avgRank })}</span>
         </div>
       </div>
       <div class="mg-meter">
         <div class="mg-track" style="position:relative"><div class="mg-ind" style="left:${pct}%;transform:translateX(-50%)"></div></div>
-        <div class="mg-scale"><span>👑 神</span><span>🐛 蛆</span></div>
+        <div class="mg-scale"><span>${I18N.t('maggot.scaleGod')}</span><span>${I18N.t('maggot.scaleMaggot')}</span></div>
       </div>
       <div class="mg-refs">
-        <div class="item"><b>#${r.refs.kdr}</b><span>平均KD排名</span></div>
-        <div class="item"><b>#${r.refs.kr}</b><span>平均击杀排名</span></div>
-        <div class="item"><b>#${r.refs.dr}</b><span>生存/经济排名</span></div>
-        <div class="item"><b>#${r.refs.or}</b><span>MVP得分排名</span></div>
-        <div class="item"><b>${r.refs.wr}%</b><span>近12局胜率</span></div>
+        <div class="item"><b>#${r.refs.kdr}</b><span>${I18N.t('maggot.avgKdr')}</span></div>
+        <div class="item"><b>#${r.refs.kr}</b><span>${I18N.t('maggot.avgKr')}</span></div>
+        <div class="item"><b>#${r.refs.dr}</b><span>${I18N.t('maggot.avgDr')}</span></div>
+        <div class="item"><b>#${r.refs.or}</b><span>${I18N.t('maggot.avgOr')}</span></div>
+        <div class="item"><b>${r.refs.wr}%</b><span>${I18N.t('maggot.wr12')}</span></div>
       </div>
       <table class="matches">
-        <thead><tr><th>结果</th><th>对局ID</th><th>队内名次</th><th>击杀</th><th>MVP</th><th>KD</th><th>损失</th><th>ELO变化</th></tr></thead>
+        <thead><tr><th>${I18N.t('maggot.thResult')}</th><th>${I18N.t('maggot.thFid')}</th><th>${I18N.t('maggot.thRank')}</th><th>${I18N.t('maggot.thKills')}</th><th>${I18N.t('maggot.thMvp')}</th><th>${I18N.t('maggot.thKd')}</th><th>${I18N.t('maggot.thLosses')}</th><th>${I18N.t('maggot.thElo')}</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
-      <div class="dim note">算法与断箭蛆指数网站同步：最近 12 场有效对局（带 ELO 变动）的队内 MVP 名次平均 → 余弦平滑映射 1~10。数据全部来自公开接口。</div>
+      <div class="dim note">${esc(I18N.t('maggot.algorithm'))}</div>
     </div>`;
 }
 
@@ -1640,10 +1691,10 @@ function renderBypassHint(s) {
   const el = $('bypassHint');
   if (!el) return;
   if (s && s.enabled) {
-    el.textContent = '⚡ 开发者：BATrace 专属提速已启用（间隔 ' + (s.delayMs || 300) + 'ms）';
+    el.textContent = I18N.t('dev.bypassOn', { ms: s.delayMs || 300 });
     el.style.color = '#4ade80';
   } else {
-    el.textContent = 'BATrace 请求间隔 1200ms（无专属提速）';
+    el.textContent = I18N.t('dev.bypassOff');
     el.style.color = '';
   }
 }
@@ -1651,17 +1702,17 @@ function renderVersion(v) {
   if (!v) return;
   lastVersionInfo = v;
   const av = $('aboutVer');
-  if (av) av.textContent = `当前版本 v${v.current}`;
+  if (av) av.textContent = I18N.t('version.current', { v: v.current });
   const verEl = $('ver');
   if (verEl && v.current) verEl.textContent = 'v' + v.current;
   const banner = $('updateBanner');
   if (v.hasUpdate) {
-    $('updateText').textContent = `发现新版本 ${v.latest}${v.announcement ? '：' + v.announcement : ''}`;
+    $('updateText').textContent = I18N.t('version.new', { v: v.latest }) + (v.announcement ? '：' + v.announcement : '');
     if (banner) banner.classList.remove('hidden');
   }
   const info = $('updateInfo');
   if (info) {
-    info.innerHTML = `<p class="dim">最新版本 <b>${esc(v.latest)}</b>${v.hasUpdate ? '（有新版本，见上方横幅）' : '（已是最新）'}${v.announcement ? '｜公告：' + esc(v.announcement) : ''}｜<a href="#" class="link" id="linkVersion">GitHub 页面</a></p>`;
+    info.innerHTML = `<p class="dim">${v.hasUpdate ? I18N.t('version.latestNew', { v: esc(v.latest) }) : I18N.t('version.latest', { v: esc(v.latest) })}${v.announcement ? I18N.t('version.announcement', { a: esc(v.announcement) }) : ''}｜<a href="#" class="link" id="linkVersion">${I18N.t('version.github')}</a></p>`;
     const lv = $('linkVersion');
     if (lv) lv.addEventListener('click', (e) => { e.preventDefault(); openLink(GITHUB_URL); });
   }
@@ -1681,20 +1732,20 @@ function bindUI() {
     const cfg = await BA.getConfig().catch(() => null);
     const url = (cfg && cfg.heartbeatUrl) || '';
     const el = $('heartbeatTest');
-    el.textContent = '测试中…';
+    el.textContent = I18N.t('dev.testing');
     try {
       const r = await BA.pingHeartbeat(url);
-      if (!r) { el.textContent = '心跳未初始化'; return; }
-      if (r.ok && r.stats) el.textContent = `✅ 上报成功（${r.lastPing}），服务端当前在线 ${r.stats.online} 人`;
-      else el.textContent = '❌ ' + (r.lastError || '上报失败（请检查地址与服务器）');
+      if (!r) { el.textContent = I18N.t('dev.heartbeatNotInit'); return; }
+      if (r.ok && r.stats) el.textContent = I18N.t('dev.heartbeatOk', { t: r.lastPing, n: r.stats.online });
+      else el.textContent = '❌ ' + (r.lastError || I18N.t('dev.heartbeatFail'));
     } catch (e) {
-      el.textContent = '❌ 测试失败：' + e.message;
+      el.textContent = I18N.t('dev.testFail', { msg: e.message });
     }
   });
   on('btnDetect', 'click', async () => {
     const dir = await BA.detectDir();
-    if (dir) { $('setLogDir').value = dir; $('dirHint').textContent = '检测到：' + dir; }
-    else $('dirHint').textContent = '未检测到，请手动选择';
+    if (dir) { $('setLogDir').value = dir; $('dirHint').textContent = I18N.t('dev.dirDetected', { dir: dir }); }
+    else $('dirHint').textContent = I18N.t('dev.dirNotFound');
   });
 
   on('btnConfirmYes', 'click', () => closeConfirm(true));
@@ -1715,7 +1766,7 @@ function bindUI() {
   });
 
   on('btnMaggot', 'click', () => {
-    if (!lastReport) { setStatus('请先搜索并点选一位玩家（粗查）再查蛆指数', false); return; }
+    if (!lastReport) { setStatus(I18N.t('dev.needSearchFirst'), false); return; }
     runMaggot(lastReport.id, lastReport.name);
   });
   on('btnUpdateClose', 'click', () => $('updateBanner').classList.add('hidden'));
@@ -1732,15 +1783,15 @@ function bindUI() {
     try {
       const data = await BA.searchPlayers(q);
       const list = data.players || [];
-      const offlineNote = data.offline ? '<div class="dim">⚠ 离线：以下为本地见过的玩家匹配（API 不可用）</div>' : '';
+      const offlineNote = data.offline ? '<div class="dim">' + esc(I18N.t('dev.offlineNote')) + '</div>' : '';
       $('searchResults').innerHTML = offlineNote + (list.length
         ? list.map((p) => `<span class="chip" data-id="${p.id}" data-name="${esc(p.name)}" data-link="${PLAYER_URL(p.id)}">${esc(p.name)}<span class="s-id">ID ${esc(p.id)}</span><span class="s-lv">Lv.${p.level ?? '?'}</span><span class="s-elo">${p.rating != null ? Math.round(p.rating) : '?'}</span></span>`).join('')
-        : (data.offline ? '<span class="dim">本地未找到见过该玩家</span>' : '<span class="dim">未找到玩家</span>'));
+        : (data.offline ? '<span class="dim">' + I18N.t('dev.noLocalMatch') + '</span>' : '<span class="dim">' + I18N.t('dev.notFound') + '</span>'));
       document.querySelectorAll('.chip').forEach((el) => {
         el.addEventListener('click', () => loadReport(el.dataset.id, el.dataset.name));
       });
     } catch (e) {
-      $('searchResults').innerHTML = '<span class="loss">搜索失败：' + esc(e.message) + '</span>';
+      $('searchResults').innerHTML = '<span class="loss">' + esc(I18N.t('dev.searchFail', { msg: e.message })) + '</span>';
     }
   };
   on('btnSearch', 'click', doSearch);
@@ -1753,7 +1804,7 @@ function bindUI() {
 
   // 玩家调查弹窗 / 封禁 / 主题
   on('btnInvClose', 'click', () => { clearInvGameTimer(); stopRadarLoading(); $('investigateModal').classList.add('hidden'); });
-  on('btnInvRefresh', 'click', () => { if (invId) { $('invInfo').textContent = '载入中…'; loadInvestigate(invId); } });
+  on('btnInvRefresh', 'click', () => { if (invId) { $('invInfo').textContent = I18N.t('loading.detail'); loadInvestigate(invId); } });
   on('btnInvMaggot', 'click', () => { if (invId) { $('investigateModal').classList.add('hidden'); runMaggot(invId, invName); } });
   on('btnInvOpen', 'click', () => { if (invId) openLink(PLAYER_URL(invId)); });
   on('btnBanCheaters', 'click', toggleBanCheaters);
@@ -1768,19 +1819,19 @@ function bindUI() {
   on('btnTestBanNotify', 'click', () => {
     // 关掉设置，3 秒后触发系统弹窗模拟提醒
     $('settingsModal').classList.add('hidden');
-    setStatus('3 秒后模拟封禁提醒…', true);
+    setStatus(I18N.t('dev.banNotifySoon'), true);
     setTimeout(async () => {
       const r = await BA.testBanNotify();
-      setStatus((r && r.message) || '模拟失败', !!(r && r.ok));
+      setStatus((r && r.message) || I18N.t('dev.simFail'), !!(r && r.ok));
     }, 3000);
   });
-  on('btnTestMatchSync', 'click', async () => { const r = await BA.syncMyMatchesNow(); $('testResult').textContent = (r && r.message) || '未知'; });
-  on('btnTestBanSync', 'click', async () => { const r = await BA.syncBans(); $('testResult').textContent = (r && r.newly != null) ? ('封禁检查完成，本次新增 ' + r.newly + ' 人') : '封禁检查完成'; });
-  on('btnTestVersion', 'click', async () => { const r = await BA.testVersionUpdate(); $('testResult').textContent = (r && r.message) || '未知'; });
+  on('btnTestMatchSync', 'click', async () => { const r = await BA.syncMyMatchesNow(); $('testResult').textContent = (r && r.message) || I18N.t('dev.unknown'); });
+  on('btnTestBanSync', 'click', async () => { const r = await BA.syncBans(); $('testResult').textContent = (r && r.newly != null) ? I18N.t('dev.banCheckDoneN', { n: r.newly }) : I18N.t('dev.banCheckDone'); });
+  on('btnTestVersion', 'click', async () => { const r = await BA.testVersionUpdate(); $('testResult').textContent = (r && r.message) || I18N.t('dev.unknown'); });
   on('btnTestRecord', 'click', async () => {
-    $('testResult').textContent = '🎥 开始录制 60 秒（只存本地不上传），请切到游戏窗口…';
+    $('testResult').textContent = I18N.t('dev.recTestStart');
     const r = await BA.testRecord();
-    if (!r || !r.ok) { $('testResult').textContent = '录制测试失败：' + ((r && r.message) || '未知'); return; }
+    if (!r || !r.ok) { $('testResult').textContent = I18N.t('dev.recTestFail', { msg: (r && r.message) || I18N.t('dev.unknown') }); return; }
   });
 
   // 卡组工具
@@ -1790,8 +1841,8 @@ function bindUI() {
   on('btnBackupOk', 'click', confirmBackup);
   on('btnBackupCancel', 'click', () => { backupAllPending = false; $('backupRow').classList.add('hidden'); });
   on('btnDeckDeploy', 'click', doDeploy);
-  on('btnDeckDelFront', 'click', () => doDelete('decks', '卡组'));
-  on('btnDeckDelBack', 'click', () => doDelete('backups', '备份包'));
+  on('btnDeckDelFront', 'click', () => doDelete('decks', I18N.t('deck.decks')));
+  on('btnDeckDelBack', 'click', () => doDelete('backups', I18N.t('deck.backups')));
   on('btnSyncRestore', 'click', doSyncRestore);
   on('btnSyncIgnore', 'click', doSyncIgnore);
   on('btnSyncDismiss', 'click', dismissSyncAlert);
@@ -1801,13 +1852,10 @@ function bindUI() {
   enableToggleSelect($('deckBack'));
 
   // 对局录像
-  on('btnReplayRefresh', 'click', () => refreshReplayList($('replaySearch').value.trim()));
-  on('btnReplaySearch', 'click', () => refreshReplayList($('replaySearch').value.trim()));
-  on('replaySearch', 'keydown', (e) => { if (e.key === 'Enter') refreshReplayList($('replaySearch').value.trim()); });
   on('setReplayEnabled', 'change', async () => {
     const el = $('setReplayEnabled');
     if (el && el.checked) {
-      const ok = await askConfirm('开启后，每局会自动录制屏幕画面并保存到本地。确定开启吗？');
+      const ok = await askConfirm(I18N.t('replay.enableConfirm'));
       if (!ok) { el.checked = false; return; }
       // 每次开启都让用户选/确认游戏所在显示器（多屏时）
       const list = await BA.listDisplays().catch(() => []);
@@ -1818,38 +1866,102 @@ function bindUI() {
       }
     }
     BA.setConfig({ replayEnabled: !!(el && el.checked) });
-    if (el && el.checked) refreshReplayList($('replaySearch').value.trim());
+    if (el && el.checked) refreshReplayFids();
+  });
+  on('btnRecSettings', 'click', openRecSettings);
+  on('btnRecSettingsClose', 'click', closeRecSettings);
+  on('btnRecSettingsCancel', 'click', closeRecSettings);
+  on('btnRecSettingsSave', 'click', saveRecSettings);
+  on('btnRecDisplayRefresh', 'click', async () => {
+    const sel = $('recDisplay');
+    if (!sel) return;
+    const cur = sel.value;
+    const list = await BA.listDisplays().catch(() => []);
+    sel.innerHTML = list.map((d) => '<option value="' + esc(d.id) + '">' + esc(d.label || d.id) + '</option>').join('');
+    if (cur) sel.value = cur;
+    if (!sel.value && list.length) sel.value = list[0].id;
+  });
+  ['recQualityRange', 'recFpsRange', 'recBitrateRange'].forEach((rid) => {
+    on(rid, 'input', () => { updateRecEstimate(); });
+  });
+  on('recAudio', 'change', updateRecEstimate);
+  on('btnRecSaveDir', 'click', async () => {
+    const r = await BA.selectReplaySaveDir();
+    if (!r || !r.ok || !r.dir) return;
+    recSaveDirCache = r.dir;
+    const dirEl = $('recSaveDir');
+    if (dirEl) dirEl.textContent = recSaveDirCache;
+    const msg = $('recSettingsMsg');
+    if (msg) msg.textContent = recOriginalDir && recOriginalDir !== recSaveDirCache && recOriginalCount > 0 ? I18N.t('replay.newDirHint') : '';
+  });
+  on('btnRecMigrate', 'click', async () => {
+    let newDir = recSaveDirCache || '';
+    if (!newDir || newDir === recOriginalDir) {
+      const pick = await askConfirm(I18N.t('replay.pickDirConfirm'));
+      if (!pick) return;
+      const r = await BA.selectReplaySaveDir();
+      if (!r || !r.ok || !r.dir) return;
+      recSaveDirCache = r.dir;
+      newDir = r.dir;
+      const dirEl = $('recSaveDir'); if (dirEl) dirEl.textContent = recSaveDirCache;
+    }
+    if (!recOriginalDir || newDir === recOriginalDir) {
+      const msg = $('recSettingsMsg'); if (msg) msg.textContent = I18N.t('replay.noMigrate');
+      return;
+    }
+    const ok = await askConfirm(I18N.t('replay.migrateConfirm', { from: recOriginalDir, to: newDir }));
+    if (!ok) return;
+    try {
+      const mv = await BA.moveReplays(recOriginalDir, newDir);
+      if (mv && mv.ok) { recMoved = true; recOriginalCount = 0; }
+      const msg = $('recSettingsMsg');
+      if (msg) msg.textContent = (mv && mv.ok) ? I18N.t('replay.migratedNFile', { n: (mv && mv.moved) || 0 }) : I18N.t('replay.migrateFail', { msg: (mv && mv.message) || I18N.t('common.unknown') });
+    } catch (err) {
+      const msg = $('recSettingsMsg'); if (msg) msg.textContent = I18N.t('replay.migrateFail', { msg: err.message });
+    }
+  });
+  on('btnRecOpenSaveDir', 'click', () => { BA.openLocalReplayFolder(); });
+  on('btnReplayOpenFolder', 'click', () => { BA.openLocalReplayFolder(); });
+  on('btnReplayClean30', 'click', async () => {
+    const ok = await askConfirm(I18N.t('replay.clean30Confirm'));
+    if (!ok) return;
+    try {
+      const r = await BA.cleanLocalReplays(30);
+      setStatus(I18N.t('status.deletedN', { n: (r && r.removed) || 0 }), true);
+      renderReplayList();
+      refreshReplayFids();
+    } catch (e) { setStatus(I18N.t('status.deleteFailed', { msg: e.message }), false); }
   });
   on('btnDisplayPickClose', 'click', () => { $('displayPickerModal').classList.add('hidden'); if (displayPickResolve) { displayPickResolve(null); displayPickResolve = null; } });
   on('btnReplayClose', 'click', closeReplayPlayer);
   on('btnReplayPickerClose', 'click', () => { $('replayPickerModal').classList.add('hidden'); if (replayPickResolve) { replayPickResolve(null); replayPickResolve = null; } });
   on('btnLocalClean30', 'click', async () => {
-    const ok = await askConfirm('删除 30 天前的本地录像？');
+    const ok = await askConfirm(I18N.t('replay.clean30LocalConfirm'));
     if (!ok) return;
     try {
       const r = await BA.cleanLocalReplays(30);
-      $('localReplayResult').textContent = '已删除 ' + ((r && r.removed) || 0) + ' 条 30 天前的本地录像';
+      $('localReplayResult').textContent = I18N.t('status.deletedNLocal', { n: (r && r.removed) || 0 });
       refreshLocalReplayList();
-      refreshReplayList($('replaySearch').value.trim());
-    } catch (e) { $('localReplayResult').textContent = '删除失败：' + e.message; }
+      refreshReplayFids();
+    } catch (e) { $('localReplayResult').textContent = I18N.t('status.deleteFailed', { msg: e.message }); }
   });
   on('btnOpenLocalReplay', 'click', () => { BA.openLocalReplayFolder(); });
   on('btnLocalCleanAll', 'click', async () => {
-    const ok = await askConfirm('确定删除全部本地录像吗？');
+    const ok = await askConfirm(I18N.t('replay.deleteAllConfirm'));
     if (!ok) return;
     try {
       const r = await BA.cleanLocalReplays(0);
-      $('localReplayResult').textContent = '已删除 ' + ((r && r.removed) || 0) + ' 条本地录像';
+      $('localReplayResult').textContent = I18N.t('status.deletedAllLocal', { n: (r && r.removed) || 0 });
       refreshLocalReplayList();
-      refreshReplayList($('replaySearch').value.trim());
-    } catch (e) { $('localReplayResult').textContent = '删除失败：' + e.message; }
+      refreshReplayFids();
+    } catch (e) { $('localReplayResult').textContent = I18N.t('status.deleteFailed', { msg: e.message }); }
   });
 }
 
 async function saveSettings() {
   const dir = $('setLogDir').value.trim();
   const v = await BA.validateDir(dir);
-  if (!v.ok) { $('dirHint').textContent = '目录无效：' + (v.reason || ''); return; }
+  if (!v.ok) { $('dirHint').textContent = I18N.t('dev.dirInvalid', { reason: v.reason || '' }); return; }
   await BA.setConfig({
     logDir: dir,
     autoQueryCurrentMatch: $('setAuto').checked,
@@ -1865,25 +1977,60 @@ async function saveSettings() {
   setBanCardVisible($('setBanCard').checked);
   applyTheme(currentTheme);
   $('settingsModal').classList.add('hidden');
-  setStatus('监听中', true);
+  setStatus(I18N.t('status.listening'), true);
   $('fileText').textContent = dir;
 }
 
 // ---------- 主流程 ----------
+// 语言切换：静态 data-i18n 由 I18N.setLang 处理；这里重渲染依赖 JS 的核心动态文案
+function applyLangUI() {
+  if (archiveList && archiveList.length) renderArchive(archiveList);
+  renderReplayList();
+  if (lastVersionInfo) renderVersion(lastVersionInfo);
+  if (lastHeartbeat) renderHeartbeat(lastHeartbeat);
+  if (currentCfg) renderReplayNote(currentCfg);
+  const st = $('statusText');
+  if (st && st.dataset.i18n) st.textContent = I18N.t(st.dataset.i18n);
+}
+
+// 页眉四语言按钮（中文 / English / 日本語 / Русский）
+function bindLangButtons() {
+  const pairs = [['langEn', 'en'], ['langZh', 'zh'], ['langJa', 'ja'], ['langRu', 'ru']];
+  const cur = I18N.lang || 'zh';
+  for (const [id, lg] of pairs) {
+    const b = document.getElementById(id);
+    if (!b) continue;
+    b.classList.toggle('active', cur === lg);
+    b.addEventListener('click', async () => {
+      I18N.setLang(lg);
+      for (const [id2, lg2] of pairs) {
+        const bb = document.getElementById(id2);
+        if (bb) bb.classList.toggle('active', lg === lg2);
+      }
+      try { await BA.setConfig({ lang: lg }); } catch (e) {}
+    });
+  }
+}
+
 async function init() {
   const cfg = await BA.getConfig();
   savedTheme = cfg.theme || 'dark';
   applyTheme(savedTheme);
+  currentCfg = cfg;
+  I18N.setLang(cfg.lang || 'zh');
+  bindLangButtons();
+  I18N.onChange(applyLangUI);
   setApmVisible(!!cfg.inputHookEnabled);
   setBanCardVisible(!!cfg.banCardVisible);
   const repSw = $('setReplayEnabled'); if (repSw) repSw.checked = !!cfg.replayEnabled;
-  refreshReplayList('');
+  refreshReplayFids();
+  renderReplayList();
   if (cfg.logDir) {
     const v = await BA.validateDir(cfg.logDir);
-    setStatus(v.ok ? '监听中' : '目录无效：' + (v.reason || ''), v.ok);
+    setStatus(v.ok ? I18N.t('status.listening') : I18N.t('status.dirInvalid') + '：' + (v.reason || ''), v.ok);
     if (v.ok) $('fileText').textContent = cfg.logDir;
   } else {
-    setStatus('未设置日志目录（点设置）', false);
+    setStatus(I18N.t('status.noDir'), false);
   }
 
   const st = await BA.getWatcherStatus();
@@ -1896,21 +2043,21 @@ async function init() {
   BA.onSession((d) => renderSession(d));
   BA.onWatcher((d) => {
     if (d.file) $('fileText').textContent = d.file;
-    if (!d.file) setStatus('未找到日志文件', false);
+    if (!d.file) setStatus(I18N.t('status.noLogFile'), false);
   });
   BA.onMatchQuerying((d) => {
     if (d.prev) {
       prevRows = {};
       for (const p of d.players) prevRows[p.id] = { ...p, status: 'loading' };
       renderPrevGrid();
-      $('queryStatus').textContent = `正在查询上一局 ${d.players.length} 位玩家…`;
+      $('queryStatus').textContent = I18N.t('match.queryPrev', { n: d.players.length });
       return;
     }
     resetPrevIfViewing();
     matchRows = {};
     for (const p of d.players) matchRows[p.id] = { ...p, status: 'loading' };
     renderMatchGrid();
-    $('queryStatus').textContent = `正在查询 ${d.players.length} 位玩家…`;
+    $('queryStatus').textContent = I18N.t('match.querying', { n: d.players.length });
   });
   BA.onMatchPlayer((row) => {
     if (row.prev) {
@@ -1925,11 +2072,11 @@ async function init() {
     querying = false;
     if (d.prev) {
       const done = Object.values(prevRows).filter((r) => r.status === 'done').length;
-      $('queryStatus').textContent = `上一局查询完成：${done} 位玩家`;
+      $('queryStatus').textContent = I18N.t('match.prevDone', { n: done });
       return;
     }
     const done = Object.values(matchRows).filter((r) => r.status === 'done').length;
-    $('queryStatus').textContent = `查询完成：${done} 位玩家（${d.fid ? '对局 ' + d.fid : '房间'}）`;
+    $('queryStatus').textContent = I18N.t('match.queryDone', { n: done, ctx: d.fid ? I18N.t('match.id', { id: d.fid }) : I18N.t('match.room') });
   });
   BA.onMatchesChanged((d) => renderArchive(d && d.list));
   BA.onDeckChanged(() => refreshDecks());
@@ -1945,36 +2092,38 @@ async function init() {
   BA.onApiHealth(renderApiHealth);
   BA.getApiHealth().then(renderApiHealth).catch(() => {});
   BA.getBans().then(renderBans).catch(() => {});
-  BA.onBansChanged((d) => { if (banView === 'met') { banView = 'all'; const btn = $('btnBanCheaters'); if (btn) btn.textContent = '🔍 我遇到过的作弊者'; } renderBans(d && d.list); });
+  BA.onBansChanged((d) => { if (banView === 'met') { banView = 'all'; const btn = $('btnBanCheaters'); if (btn) btn.textContent = I18N.t('ban.cheatersBtn'); } renderBans(d && d.list); });
   BA.onBanAlert(renderBanAlert);
   BA.onTestResult((d) => {
     if (!d) return;
     const el = $('testResult');
     if (!el) return;
-    if (d.ok) { el.textContent = '✅ 录制测试完成：' + d.file + '（' + fmtSize(d.size) + '），已存本地，可在「本地录像管理」查看/删除'; refreshLocalReplayList(); }
-    else { el.textContent = '❌ 录制测试失败：' + (d.error || '未知'); }
+    if (d.ok) { el.textContent = I18N.t('status.recTestDone', { file: d.file, size: fmtSize(d.size) }); refreshLocalReplayList(); renderReplayList(); }
+    else { el.textContent = I18N.t('status.recTestFailed', { msg: d.error || I18N.t('common.unknown') }); }
   });
   BA.onRoomToolUsers((ids) => { toolUserIds = new Set((ids || []).map(String)); const cur = session && session.current; if (cur) renderMatchGrid(); else renderMatchGrid(); });
   BA.onReplayRecording((d) => {
     replayRecordingActive = !!(d && d.active && !d.error);
-    if (d && d.error) { const el = $('replayStatus'); if (el) { el.textContent = '⚠ 录制异常：' + d.error; el.title = '录制失败详情见 %APPDATA%/broken-arrow-log-assistant/replay.log'; } setReplayPreview(false); return; }
+    if (d && d.error) { const el = $('replayStatus'); if (el) { el.textContent = I18N.t('replay.recError', { msg: d.error }); el.title = I18N.t('replay.recErrorDetail'); } setReplayPreview(false); return; }
     renderReplayStatus(d);
     if (d && d.active) {
       const cur = d.current || null;
       const lab = $('replayPreviewLabel');
-      if (lab) lab.textContent = '🔴 正在录制' + (cur && cur.sourceId ? ' · ' + cur.sourceId : '');
+      if (lab) lab.textContent = I18N.t('replay.recording') + (cur && cur.sourceId ? ' · ' + cur.sourceId : '');
     } else {
       setReplayPreview(false);
     }
   });
   BA.onReplayProgress(() => { BA.getReplayStatus().then(renderReplayStatus).catch(() => {}); });
-  BA.onReplayChanged(() => { BA.getReplayStatus().then(renderReplayStatus).catch(() => {}); refreshReplayList($('replaySearch').value.trim(), { silent: true }); });
+  BA.onReplayChanged(() => { BA.getReplayStatus().then(renderReplayStatus).catch(() => {}); refreshReplayFids(); renderReplayList(); });
   // 预览帧持续更新图片；只有确实在录制时才显示（防止停止后残留帧把它重新点亮）
   BA.onReplayPreview((d) => {
     const img = $('replayPreviewImg');
     if (!img || !d || !d.dataUrl) return;
     img.src = d.dataUrl;
     setReplayPreview(replayRecordingActive);
+    const au = $('replayPreviewAudio');
+    if (au) au.textContent = d.hasAudio ? I18N.t('replay.audioOn') : I18N.t('replay.audioOff');
   });
   // 点击玩家卡片 → 打开完整报告；📋 按钮 → 复制（上一局视图用 prevRows）
   $('teamGrid').addEventListener('click', (e) => {
@@ -1988,7 +2137,7 @@ async function init() {
   });
   BA.onMaggotProgress((d) => {
     const pct = d.total ? (d.done / d.total) * 100 : 0;
-    setMaggotProgress(`查蛆指数中：已解析 ${d.done}/${d.total} 场有效对局（扫描 ${d.scanned}/${d.of}）…`, pct);
+    setMaggotProgress(I18N.t('maggot.progress', { done: d.done, total: d.total, scanned: d.scanned, of: d.of }), pct);
   });
   BA.getVersion().then(renderVersion).catch(() => {});
   BA.onVersion(renderVersion);
@@ -1997,9 +2146,9 @@ async function init() {
 }
 
 // 兜底：任何异步错误都显示出来，而不是“点了没反应”
-window.addEventListener('error', (e) => setStatus('脚本错误：' + (e.message || '未知'), false));
-window.addEventListener('unhandledrejection', (e) => setStatus('异步错误：' + (e.reason && e.reason.message || e.reason || '未知'), false));
+window.addEventListener('error', (e) => setStatus(I18N.t('status.scriptError', { msg: e.message || I18N.t('dev.unknown') }), false));
+window.addEventListener('unhandledrejection', (e) => setStatus(I18N.t('status.asyncError', { msg: (e.reason && e.reason.message) || e.reason || I18N.t('dev.unknown') }), false));
 
 bindUI();
-init().catch((e) => setStatus('初始化失败：' + (e.message || e), false));
+init().catch((e) => setStatus(I18N.t('status.initFail', { msg: e.message || e }), false));
 

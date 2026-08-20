@@ -9,7 +9,7 @@ let winRef = null;
 // 注册桩处理器：冒烟测试不跑主应用，只验证渲染层（preload/脚本/按钮）
 function registerStubIpc() {
   const { ipcMain } = require('electron');
-  const cfg = { logDir: '', pollMs: 1500, apiDelayMs: 350, autoQueryCurrentMatch: true, inputHookEnabled: false, replayEnabled: false, replayServerUrl: '', replaySecret: '', replayQuality: 720 };
+  const cfg = { logDir: '', pollMs: 1500, apiDelayMs: 350, autoQueryCurrentMatch: true, inputHookEnabled: false, replayEnabled: false, replayServerUrl: '', replaySecret: '', replayQuality: 720, replayFps: 30, replayBitrateMbps: 5, replayExposure: 0, replayAudio: 'default', replaySaveDir: '', lang: 'zh' };
   const handle = (ch, fn) => ipcMain.handle(ch, fn);
   handle('config:get', () => ({ ...cfg }));
   handle('config:set', (e, patch) => Object.assign(cfg, patch));
@@ -50,7 +50,7 @@ function registerStubIpc() {
     list: [
       { fid: '8049993', map: 'Ignalina Powerplant', endTime: Date.now() - 86400000, durationSec: 2700, localWon: false, winnerTeam: null, custom: false, mode: 'ranked', localSpectator: false, localEloDelta: -16.5, localEloAfter: 2555.5225, localScores: { destruction: 5855, losses: 6840, objectives: 4 }, localPersona: 'Zola', localName: 'Zola', playerCount: 10 },
       { fid: '8028345', map: 'Airport', endTime: Date.now() - 172800000, durationSec: 2700, localWon: null, winnerTeam: 1, custom: true, mode: 'custom', localSpectator: true, localEloDelta: null, localScores: null, localPersona: 'Zola', localName: 'Zola', playerCount: 14 },
-      { fid: '8026925', map: 'Baltiisk', endTime: Date.now() - 259200000, durationSec: 2699, localWon: true, winnerTeam: null, custom: true, mode: 'custom', localSpectator: false, localEloDelta: null, localScores: { destruction: 7690, losses: 5870, objectives: 6 }, localPersona: '公安九课', localName: 'Zola', playerCount: 13 }
+      { fid: '8026925', map: 'Baltiisk', endTime: Date.now() - 259200000, durationSec: 2699, localWon: true, winnerTeam: null, custom: true, mode: 'custom', localSpectator: false, localEloDelta: null, localScores: { destruction: 7690, losses: 5870, objectives: 6 }, localPersona: '公安九课', localName: 'Zola', playerCount: 13, restarted: true }
     ]
   }));
   handle('tracker:refreshMatch', () => ({ ok: true, message: '已刷新对局信息' }));
@@ -71,9 +71,14 @@ function registerStubIpc() {
   handle('replay:localClean', () => ({ ok: true, removed: 2 }));
   handle('replay:localRead', () => ({ ok: true, data: new ArrayBuffer(8), size: 8 }));
   handle('replay:openLocalFolder', () => true);
+  handle('replay:dirInfo', () => ({ ok: true, dir: 'C:\\smoke-replays', count: 2 }));
   handle('replay:testRecord', () => ({ ok: true, message: '开始录制' }));
   handle('replay:displays', () => ([{ id: '1', label: '主显示器 · 1920x1080', thumb: '' }, { id: '2', label: '副显示器 · 2560x1440', thumb: '' }]));
   handle('replay:setDisplay', () => ({ ok: true }));
+  handle('replay:selectSaveDir', () => ({ ok: true, dir: 'C:\\smoke-replays' }));
+  handle('replay:setSaveDir', () => ({ ok: true }));
+  handle('replay:moveReplays', () => ({ ok: true, moved: 2, failed: 0 }));
+  handle('replay:screenThumbnail', () => ({ ok: true, thumb: '' }));
   handle('shell:open', () => true);
 }
 
@@ -158,22 +163,51 @@ app.whenReady().then(async () => {
         out.deckFrontCount = document.getElementById('deckFront').options.length;
         out.deckPathsText = (document.getElementById('deckPaths') || {}).textContent || '';
         out.deckMsg = (document.getElementById('deckMsg') || {}).textContent || '';
-        // 对局录像卡片（常驻，开关只控制自动录制）
+        // 行车记录仪卡片（常驻，开关只控制自动录制；列表按时间倒序管理）
         out.replayCardExists = !!document.getElementById('replayCard');
         out.replayCardHidden = (document.getElementById('replayCard') || {}).classList.contains('hidden');
         out.replaySwitchCount = document.querySelectorAll('#setReplayEnabled').length;
+        out.replayTitle = ((document.querySelector('#replayCard h2') || {}).textContent || '').trim();
         out.hasReplayApi = typeof window.api.getReplayStatus === 'function' && typeof window.api.listLocalReplays === 'function';
         out.cspMediaSrc = (document.querySelector('meta[http-equiv="Content-Security-Policy"]') || {}).content || '';
         out.noPollField = !document.getElementById('setPoll');
         out.noDelayField = !document.getElementById('setDelay');
         out.noHeartbeatUrlField = !document.getElementById('setHeartbeatUrl');
         out.noReplayStorageFields = !document.getElementById('setReplayEndpoint') && !document.getElementById('setReplayAccessKey') && !document.getElementById('setReplaySecretKey') && !document.getElementById('setReplayBucket') && !document.getElementById('setReplayRegion');
+        out.hasReplayListEl = !!document.getElementById('replayList');
+        out.hasReplayListInfo = !!document.getElementById('replayListInfo');
+        out.hasReplayAudioBadge = !!document.getElementById('replayPreviewAudio');
+        out.hasReplayOpenFolderBtn = !!document.getElementById('btnReplayOpenFolder');
+        out.hasReplayClean30Btn = !!document.getElementById('btnReplayClean30');
         out.apmLabel = ((document.getElementById('settingsModal') || {}).textContent || '').indexOf('APM 监测功能') >= 0;
         const settingsEl = document.getElementById('settingsModal');
         out.settingsNoReplaySwitch = !settingsEl || (settingsEl.querySelectorAll('#setReplayEnabled').length === 0);
         out.settingsNoLocalList = !document.getElementById('localReplayList');
         out.hasLocalReplayBlock = !!document.getElementById('localReplayInfo') && !!document.getElementById('btnLocalClean30') && !!document.getElementById('btnLocalCleanAll') && !!document.getElementById('btnOpenLocalReplay');
         out.localReplayInfo = (document.getElementById('localReplayInfo') || {}).textContent || '';
+        // 录像设置弹窗：字段齐全；分辨率/帧数/码率滑块；预计大小显示
+        out.hasBtnRecSettings = !!document.getElementById('btnRecSettings');
+        out.noReplaySearchEl = !document.getElementById('replaySearch');
+        document.getElementById('btnRecSettings').click();
+        await new Promise((r) => setTimeout(r, 300));
+        out.recModalOpened = !(document.getElementById('recSettingsModal') || {}).classList.contains('hidden');
+        out.recFields = !!document.getElementById('recDisplay') && !!document.getElementById('recQualityRange') && !!document.getElementById('recFpsRange') && !!document.getElementById('recBitrateRange') && !!document.getElementById('recQualityVal') && !!document.getElementById('recFpsVal') && !!document.getElementById('recBitrateVal') && !!document.getElementById('recEstSize') && !!document.getElementById('recAudio') && !!document.getElementById('recSaveDir');
+        out.recDisplayOptions = (document.getElementById('recDisplay') || {}).options ? document.getElementById('recDisplay').options.length : 0;
+        out.recSliderDefaults = (function () {
+          const q = document.getElementById('recQualityRange');
+          const f = document.getElementById('recFpsRange');
+          const b = document.getElementById('recBitrateRange');
+          return q && f && b && Number(q.value) === 720 && Number(f.value) === 30 && Number(b.value) === 5;
+        })();
+        out.recQualityLabel = (document.getElementById('recQualityVal') || {}).textContent || '';
+        out.recFpsLabel = (document.getElementById('recFpsVal') || {}).textContent || '';
+        out.recBitrateLabel = (document.getElementById('recBitrateVal') || {}).textContent || '';
+        out.recQualityTicks = document.querySelectorAll('#qualityTicks option').length;
+        out.recEstText = (document.getElementById('recEstSize') || {}).textContent || '';
+        out.recEstHasMb = (out.recEstText || '').indexOf('MB') >= 0 || (out.recEstText || '').indexOf('GB') >= 0;
+        out.replayListRowCount = document.querySelectorAll('#replayList .replay-row').length;
+        document.getElementById('btnRecSettingsClose').click();
+        out.recModalClosed = (document.getElementById('recSettingsModal') || {}).classList.contains('hidden');
         // 关闭自动录制 → 卡片仍可见、config 写回 false
         const replaySw = document.getElementById('setReplayEnabled');
         replaySw.checked = false;
@@ -181,10 +215,6 @@ app.whenReady().then(async () => {
         await new Promise((r) => setTimeout(r, 300));
         out.replayCardStillVisibleAfterOff = !(document.getElementById('replayCard') || {}).classList.contains('hidden');
         out.replayEnabledAfterOff = (await window.api.getConfig().catch(() => ({}))).replayEnabled;
-        document.getElementById('btnReplayRefresh').click();
-        await new Promise((r) => setTimeout(r, 300));
-        out.replayListText = (document.getElementById('replayList') || {}).textContent || '';
-        out.replayListHasRow = !!document.querySelector('.replay-row');
         out.replayPreviewWrap = !!document.getElementById('replayPreviewWrap');
         out.replayPreviewHidden = (document.getElementById('replayPreviewWrap') || {}).classList.contains('hidden');
         out.replayPreviewImg = !!document.getElementById('replayPreviewImg');
@@ -202,30 +232,7 @@ app.whenReady().then(async () => {
         const firstPick = document.querySelector('#replayPickerList .replay-pick-item');
         if (firstPick) { firstPick.click(); await new Promise((r) => setTimeout(r, 400)); }
         out.replayOpenedFromArchive = !(document.getElementById('replayModal') || {}).classList.contains('hidden');
-        // 上一局：进入视图 → 点「刷新粗查」→ 应保持在上一局视图并调用 queryRoster（prev），而非退出查当前
-        document.getElementById('btnPrevMatch').click();
-        await new Promise((r) => setTimeout(r, 500));
-        out.prevViewActive = (document.getElementById('currentCardTitle') || {}).textContent === '上一局';
-        document.getElementById('btnReQuery').click();
-        await new Promise((r) => setTimeout(r, 300));
-        out.prevRefreshKeepsView = (document.getElementById('currentCardTitle') || {}).textContent === '上一局';
-        out.prevRefreshStatus = (document.getElementById('queryStatus') || {}).textContent || '';
-        // 返回当前
-        document.getElementById('btnPrevMatch').click();
-        out.replayFirstGroup = (document.querySelector('.replay-group-title') || {}).textContent || '';
-        // 右键录像行 → 菜单含 打开位置/对局详情/BATrace/删除
-        const lrow = document.querySelector('.replay-row[data-source="local"]');
-        if (lrow) {
-          lrow.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 40, clientY: 40 }));
-          out.replayCtxLocalText = (document.getElementById('ctxMenu') || {}).textContent || '';
-          document.dispatchEvent(new MouseEvent('click'));
-        } else { out.replayCtxLocalText = ''; }
-        // 本地 only：无 [云端] 徽标、无云端右键项
         out.archiveReplayMark = (document.querySelector('.archive-row .replay-mark') || {}).textContent || '';
-        out.localBadge = !!document.querySelector('.r-src.local');
-        out.noCloudBadge = !document.querySelector('.r-src.cloud');
-        out.mergedRowCount = document.querySelectorAll('.replay-row[data-source="both"]').length;
-        out.noBothSourceRows = !document.querySelector('.replay-row[data-source="both"]');
         out.replayModalExists = !!document.getElementById('replayModal') && !!document.getElementById('replayVideo') && !!document.querySelector('.replay-speed-btn');
         out.themeSwatchCount = document.querySelectorAll('.theme-swatch').length;
         out.openLocalReplayBtn = !!document.getElementById('btnOpenLocalReplay');
@@ -233,6 +240,7 @@ app.whenReady().then(async () => {
         out.noReplayConfirmModal = !document.getElementById('replayConfirmModal') && !document.getElementById('btnReplayConfirmUpload');
         out.noConfirmApi = typeof window.api.confirmUpload !== 'function' && typeof window.api.onConfirmUpload !== 'function';
         out.hasTestRecord = !!document.getElementById('btnTestRecord') && typeof window.api.testRecord === 'function';
+        out.hasNewReplayApi = typeof window.api.selectReplaySaveDir === 'function' && typeof window.api.setReplaySaveDir === 'function' && typeof window.api.moveReplays === 'function' && typeof window.api.getScreenThumbnail === 'function';
         // 查蛆指数：点击后按钮禁用 + 进度行可见 → 完成恢复 + 进度行隐藏
         lastReport = { id: '8863', name: 'Zola' }; // app.js 全局变量，模拟已选玩家
         const maggotBtn = document.getElementById('btnMaggot');
@@ -250,6 +258,47 @@ app.whenReady().then(async () => {
         // 顶栏心跳无「经代理」文案
         out.noProxyTextInHeartbeat = !((document.getElementById('onlineText') || {}).title || '').includes('经代理');
         out.displayPicker = !!document.getElementById('displayPickerModal') && !!document.getElementById('displayThumbs') && typeof window.api.listDisplays === 'function';
+        // 四语言：按钮齐全；默认中文激活；录像行右键菜单；切英文后标题变英文；档案行「已重开」徽标
+        out.langButtons = ['langEn', 'langZh', 'langJa', 'langRu'].every((id) => !!document.getElementById(id));
+        out.langZhActive = ((document.getElementById('langZh') || {}).classList || []).contains('active');
+        out.archiveHasRestarted = ((document.getElementById('archiveList') || {}).textContent || '').indexOf('已重开') >= 0;
+        const rr = document.querySelector('#replayList .replay-row[data-key]');
+        if (rr) rr.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 80, clientY: 80 }));
+        await new Promise((r) => setTimeout(r, 60));
+        out.replayCtxText = (document.getElementById('ctxMenu') || {}).textContent || '';
+        out.replayCtxHasOpenDetail = out.replayCtxText.indexOf('打开对局详情') >= 0 && out.replayCtxText.indexOf('打开位置') >= 0 && out.replayCtxText.indexOf('删除录像') >= 0;
+        document.dispatchEvent(new MouseEvent('click'));
+        document.getElementById('langEn').click();
+        await new Promise((r) => setTimeout(r, 250));
+        out.archiveTitleEn = (document.querySelector('h2[data-i18n="card.archive"]') || {}).textContent || '';
+        out.archiveTitleIsEn = /Match archive/.test(out.archiveTitleEn);
+        out.langHtmlLang = document.documentElement.lang;
+        // 语言保存修复：切英文后 config.lang 应写入 settings（preload 只暴露 setConfig）
+        out.langSavedEn = (await window.api.getConfig().catch(() => ({}))).lang === 'en';
+        // 英文下：标题 / 品牌 / 关于段落
+        out.titleEn = document.title;
+        out.titleIsEn = /Broken Arrow Log Assistant/.test(out.titleEn);
+        out.brandEn = ((document.querySelector('.brand-name') || {}).textContent || '').trim();
+        out.brandIsEn = /Broken Arrow Log Assistant/.test(out.brandEn);
+        out.aboutEn = ((document.getElementById('aboutCard') || {}).textContent || '');
+        out.aboutIsEn = /How it works/.test(out.aboutEn) && /Credits/.test(out.aboutEn);
+        // 两栏底部留白修复：.archive-list 无 max-height、.split > .card 有 max-height
+        const al = document.getElementById('archiveList');
+        const alCs = al ? getComputedStyle(al) : null;
+        out.archiveListMaxHeight = alCs ? alCs.maxHeight : '';
+        out.archiveListNoMaxH = !alCs || alCs.maxHeight === 'none' || alCs.maxHeight === '';
+        const splitCard = document.querySelector('.split > .card');
+        const scCs = splitCard ? getComputedStyle(splitCard) : null;
+        out.splitCardMaxHeight = scCs ? scCs.maxHeight : '';
+        out.splitCardHasMaxH = !!scCs && scCs.maxHeight !== 'none' && scCs.maxHeight !== '';
+        // 档案列表贴底：列表底部到卡片底部无大留白（粗略断言高度差）
+        const cardBox = splitCard ? splitCard.getBoundingClientRect() : null;
+        const listBox = al ? al.getBoundingClientRect() : null;
+        out.splitGapBottom = cardBox && listBox ? Math.round(cardBox.bottom - listBox.bottom) : -1;
+        out.splitNoGap = cardBox && listBox ? (cardBox.bottom - listBox.bottom) <= 40 : false;
+        out.langHtmlLang = document.documentElement.lang;
+        document.getElementById('langZh').click();
+        await new Promise((r) => setTimeout(r, 150));
       }
       return out;
       })()`),

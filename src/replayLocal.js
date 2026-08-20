@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const { parseReplayKey } = require('./s3Client');
+const { mapIdFromName } = require('./analyzer');
 
 const NAME_RE = /^[A-Za-z0-9_.-]+\.webm$/i;
 
@@ -96,10 +97,32 @@ function uploaderMetaFor(fid, tracker) {
     uploaderName: name || '',
     teamId: mm.localTeamId != null ? mm.localTeamId : null,
     team: mm.localTeam || (mm.localSpectator ? 'Spectators' : ''),
-    mapId: mm.mapId != null ? mm.mapId : null,
+    mapId: mm.mapId != null ? mm.mapId : mapIdFromName(mm.map),
     endTime: mm.endTime || Date.now(),
     durationSec: mm.durationSec || 0
   };
 }
 
-module.exports = { localReplayList, localReplayDelete, localReplayClean, localReplayRead, uploaderMetaFor };
+// 与对局档案/追踪库联动：按 fid 反查地图名等，避免录像文件 mapId 缺失时显示"未知地图"
+function enrichReplayMaps(list, tracker, archive, mapName) {
+  const archMap = {};
+  try {
+    const arr = (archive && typeof archive.list === 'function') ? archive.list() : (Array.isArray(archive) ? archive : []);
+    for (const a of arr) { if (a && a.fid && archMap[String(a.fid)] == null) archMap[String(a.fid)] = a.map || ''; }
+  } catch (e) {}
+  return (list || []).map((it) => {
+    const rec = tracker && tracker.data && tracker.data.matches ? tracker.data.matches[String(it.fid)] : null;
+    const archMapName = archMap[String(it.fid)] || '';
+    const trkMap = rec && rec.map && !/^map:\d+$/.test(rec.map) ? rec.map : '';
+    const map = archMapName || trkMap || (it.mapId != null ? mapName(it.mapId) : it.map || '') || '';
+    return Object.assign({}, it, {
+      map,
+      endTime: (rec && (rec.endTime || rec.firstSeenAt)) || it.createdAt || 0,
+      mode: rec ? (rec.mode || null) : null,
+      restarted: !!(rec && rec.restarted),
+      localWon: rec && rec.localWon != null ? !!rec.localWon : null
+    });
+  });
+}
+
+module.exports = { localReplayList, localReplayDelete, localReplayClean, localReplayRead, uploaderMetaFor, enrichReplayMaps };

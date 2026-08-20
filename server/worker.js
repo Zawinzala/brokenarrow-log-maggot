@@ -7,10 +7,10 @@
 //   GET  /users?token=..                            → 开发者（合二为一）：{ ok, onlineCount, online:[...], historyCount, history:[...] }（token 读环境变量 HEARTBEAT_DEV_TOKEN；每条含 geo:{country,region,city,lat,lon}）
 //   GET  /room-users?ids=1,2,3&me=<我的游戏ID>       → 房间内谁也在用本工具：仅当 me 是活跃工具用户时返回 { ok, users:[{id,online}] }（只含匹配到的，保护隐私）
 //   GET  /update-meta                                 → 公开：{ version, notes, announcement, exeUrl, publishedAt }（App 启动检查更新/公告）
-//   POST /admin/update?token=..   body: {version,notes,announcement} → 发布版本元数据（管理端）
-//   POST /admin/upload-exe?token=&name=<原始文件名> body: exe 字节 → 存 R2 dist/<原名>（保留版本号；单文件 ≤100MB）；最新上传记录在 KV meta:exe
-// 注意：R2 binding（名 REPLAY）仅用于托管 exe（admin/upload-exe）；App 不持有任何 R2 密钥。管理 token 用 ADMIN_TOKEN，未设置则回退 HEARTBEAT_DEV_TOKEN。
-// 部署：Cloudflare 控制台 Workers 编辑页整段粘贴（KV 绑定名 ONLINE_KV）；并在「设置 → 变量和机密」加 HEARTBEAT_DEV_TOKEN（开发者查询密钥）。
+//   POST /admin/update?token=..   body: {version,notes,announcement} → 发布版本元数据（管理端；主存 R2 meta/update.json）
+//   POST /admin/upload-exe?token=&name=<原始文件名> body: exe 字节 → 流式存 R2 dist/<原名>（保留版本号；单文件 ≤100MB）；最新上传记录在 R2 meta/exe.json
+// 注意：R2 binding（名 REPLAY）用于托管 exe + 版本/exe 元数据（meta/*.json，主存储，不受 KV 每日写入配额限制）；App 不持有任何 R2 密钥。管理 token 用 ADMIN_TOKEN，未设置则回退 HEARTBEAT_DEV_TOKEN。
+// 部署：Cloudflare 控制台 Workers 编辑页整段粘贴（KV 绑定名 ONLINE_KV、R2 绑定名 REPLAY）；并在「设置 → 变量和机密」加 HEARTBEAT_DEV_TOKEN（开发者查询密钥）。
 
 // 开发者查询接口密钥：从环境变量 HEARTBEAT_DEV_TOKEN 读取（不写死在代码里，防止开源仓库泄露）。
 // 部署后在 Cloudflare Workers「设置 → 变量和机密」添加 HEARTBEAT_DEV_TOKEN，查询时 ?token= 填它。
@@ -50,6 +50,47 @@ async function listKV(env, prefix) {
     cursor = res.cursor;
   }
   return out;
+}
+
+const R2_PUBLIC_BASE = 'https://brokenarrowreplay.zolahere.top';
+
+// 管理端鉴权：ADMIN_TOKEN，未设置则回退 HEARTBEAT_DEV_TOKEN
+function isAdmin(url, env) {
+  const adminToken = env.ADMIN_TOKEN || env.HEARTBEAT_DEV_TOKEN || '';
+  return !!adminToken && url.searchParams.get('token') === adminToken;
+}
+
+// 读取版本/exe 元数据：主存 R2（meta/*.json），R2 缺失时回退旧 KV（迁移兼容）
+async function readMetaJson(env, r2Key, kvKey) {
+  try {
+    const obj = await env.REPLAY.get(r2Key);
+    if (obj) {
+      const raw = await obj.text();
+      if (raw) { const parsed = JSON.parse(raw); if (parsed) return parsed; }
+    }
+  } catch (e) {}
+  try {
+    const raw = await env.ONLINE_KV.get(kvKey);
+    if (raw) return JSON.parse(raw);
+  } catch (e) {}
+  return null;
+}
+
+// 写元数据：主存 R2（不受 KV 每日写入配额限制），KV 尽力同步（配额满静默忽略，不影响发布）
+async function writeMetaJson(env, r2Key, kvKey, obj) {
+  const raw = JSON.stringify(obj);
+  await env.REPLAY.put(r2Key, raw, { httpMetadata: { contentType: 'application/json' } });
+  try { await env.ONLINE_KV.put(kvKey, raw); } catch (e) {}
+  return obj;
+}
+
+// 清洗 exe 文件名：去路径、禁字符、保证 .exe 后缀、≤120 字符
+function sanitizeExeName(name) {
+  let fname = String(name || '').split(/[\\/]/).pop().trim().slice(0, 120);
+  fname = fname.replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_');
+  if (!fname) fname = 'broken-arrow-log-assistant.exe';
+  if (!/\.exe$/i.test(fname)) fname += '.exe';
+  return fname;
 }
 
 export default {
@@ -95,56 +136,59 @@ export default {
       return json({ ok: true, users });
     }
 
-    // ---- 软件更新 / 公告（Cloudflare：版本元数据 + exe 托管） ----
-    // 管理端 token：ADMIN_TOKEN，未设置则回退 HEARTBEAT_DEV_TOKEN（你现有的 token 直接可用）
+    // ---- 软件更新 / 公告（版本元数据主存 R2 meta/*.json，exe 托管 R2 dist/） ----
     if (path === '/update-meta' && request.method === 'GET') {
-      const raw = await env.ONLINE_KV.get('meta:update').catch(() => null);
-      if (!raw) return json({ ok: false, error: 'no meta' }, 404);
-      let m = null;
-      try { m = JSON.parse(raw); } catch (e) {}
-      if (!m) return json({ ok: false, error: 'bad meta' }, 500);
+      const m = await readMetaJson(env, 'meta/update.json', 'meta:update');
+      if (!m) return json({ ok: false, error: 'no meta' }, 404);
       return json({ ok: true, version: m.version, notes: m.notes, announcement: m.announcement, exeUrl: m.exeUrl, publishedAt: m.publishedAt, bypassUA: String(env.BATRACE_BYPASS_UA || '') });
     }
-    if ((path === '/admin/update' || path === '/admin/upload-exe') && request.method === 'POST') {
-      const adminToken = env.ADMIN_TOKEN || env.HEARTBEAT_DEV_TOKEN || '';
-      if (!adminToken || url.searchParams.get('token') !== adminToken) return json({ error: 'forbidden' }, 403);
-      if (path === '/admin/update') {
-        let b = null;
-        try { b = await request.json(); } catch (e) {}
-        if (!b) return json({ error: 'bad body' }, 400);
-        // 支持只更新公告：版本号可留空，保留已发布的版本/更新内容
-        const raw = await env.ONLINE_KV.get('meta:update').catch(() => null);
-        let old = null;
-        try { old = raw ? JSON.parse(raw) : null; } catch (e) {}
-        const version = String(b.version || '').trim();
-        if (!version && !old) return json({ error: 'missing version（首次发布必须填版本号）' }, 400);
-        const exeRaw = await env.ONLINE_KV.get('meta:exe').catch(() => null);
-        let latestExe = null;
-        try { latestExe = exeRaw ? JSON.parse(exeRaw) : null; } catch (e) {}
-        const meta = {
-          version: version || (old && old.version) || '',
-          notes: String(b.notes != null ? b.notes : (old && old.notes) || '').trim(),
-          announcement: String(b.announcement != null ? b.announcement : (old && old.announcement) || '').trim(),
-          exeUrl: String(b.exeUrl || '').trim() || (latestExe && latestExe.url) || (old && old.exeUrl) || '',
-          publishedAt: Date.now()
-        };
-        await env.ONLINE_KV.put('meta:update', JSON.stringify(meta));
-        return json({ ok: true, meta });
-      }
-      // upload-exe：按原始文件名存 R2 dist/<原名>（保留版本号等），并记录到 KV meta:exe 供发布用
-      const body = await request.arrayBuffer();
-      if (!body || !body.byteLength) return json({ error: 'empty' }, 400);
-      if (body.byteLength > 100 * 1024 * 1024) return json({ error: 'too large (>100MB)' }, 413);
-      let fname = String(url.searchParams.get('name') || '').split(/[\\/]/).pop().trim().slice(0, 120);
-      fname = fname.replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_');
-      if (!fname) fname = 'broken-arrow-log-assistant.exe';
-      if (!/\.exe$/i.test(fname)) fname += '.exe';
-      const key = 'dist/' + fname;
-      await env.REPLAY.put(key, body, { httpMetadata: { contentType: 'application/octet-stream' } });
-      const exeUrl = 'https://brokenarrowreplay.zolahere.top/' + key.split('/').map(encodeURIComponent).join('/');
-      await env.ONLINE_KV.put('meta:exe', JSON.stringify({ filename: fname, url: exeUrl, size: body.byteLength, uploadedAt: Date.now() }));
-      return json({ ok: true, url: exeUrl, filename: fname, size: body.byteLength });
+    // 管理端 token：ADMIN_TOKEN，未设置则回退 HEARTBEAT_DEV_TOKEN（你现有的 token 直接可用）
+    if (path === '/admin/update' && request.method === 'POST') {
+      if (!isAdmin(url, env)) return json({ error: 'forbidden' }, 403);
+      let b = null;
+      try { b = await request.json(); } catch (e) {}
+      if (!b) return json({ error: 'bad body' }, 400);
+      const old = await readMetaJson(env, 'meta/update.json', 'meta:update');
+      const latestExe = await readMetaJson(env, 'meta/exe.json', 'meta:exe');
+      const version = String(b.version || '').trim();
+      if (!version && !old) return json({ error: 'missing version（首次发布必须填版本号）' }, 400);
+      const meta = {
+        version: version || (old && old.version) || '',
+        notes: String(b.notes != null ? b.notes : (old && old.notes) || '').trim(),
+        announcement: String(b.announcement != null ? b.announcement : (old && old.announcement) || '').trim(),
+        exeUrl: String(b.exeUrl || '').trim() || (latestExe && latestExe.url) || (old && old.exeUrl) || '',
+        publishedAt: Date.now()
+      };
+      await writeMetaJson(env, 'meta/update.json', 'meta:update', meta);
+      return json({ ok: true, meta });
     }
+    if (path === '/admin/upload-exe' && request.method === 'POST') {
+      if (!isAdmin(url, env)) return json({ error: 'forbidden' }, 403);
+      // 流式上传：直接把 request.body 原样交给 R2 put（R2 只认可 request/response body 或 FixedLengthStream，
+      // 不能包一层 TransformStream，否则报 'must have a known length'）。100MB 上限用 Content-Length 预检 + 落盘后超限删除兜底。
+      const fname = sanitizeExeName(url.searchParams.get('name'));
+      const key = 'dist/' + fname;
+      const MAX = 100 * 1024 * 1024;
+      const contentLength = Number(request.headers.get('Content-Length') || 0);
+      if (contentLength > MAX) return json({ error: 'too large (>100MB)' }, 413);
+      if (!request.body) return json({ error: 'empty' }, 400);
+      let obj = null;
+      try {
+        obj = await env.REPLAY.put(key, request.body, { httpMetadata: { contentType: 'application/octet-stream' } });
+      } catch (e) {
+        return json({ error: 'upload failed: ' + String((e && e.message) || e) }, 500);
+      }
+      const size = (obj && obj.size) || 0;
+      if (size > MAX) {
+        try { await env.REPLAY.delete(key); } catch (e2) {}
+        return json({ error: 'too large (>100MB)' }, 413);
+      }
+      const exeUrl = R2_PUBLIC_BASE + '/' + key.split('/').map(encodeURIComponent).join('/');
+      const metaExe = { filename: fname, url: exeUrl, size, uploadedAt: Date.now() };
+      await writeMetaJson(env, 'meta/exe.json', 'meta:exe', metaExe);
+      return json({ ok: true, url: exeUrl, filename: fname, size });
+    }
+
     // ---- 心跳上报 ----
     if (path === '/heartbeat' && (request.method === 'POST' || request.method === 'GET')) {
       let anon = '', v = '', name = '', gameId = '';
@@ -174,7 +218,7 @@ export default {
       try { const raw = await env.ONLINE_KV.get(lkey); if (raw) live = JSON.parse(raw); } catch (e) {}
       const writeLive = !live || !live.lastSeen || (now - live.lastSeen) >= LIVE_THROTTLE_MS;
       if (writeLive) {
-        await env.ONLINE_KV.put(lkey, JSON.stringify({ name, gameId, anon, ip, version: v, lastSeen: now, geo }), { expirationTtl: LIVE_TTL_S });
+        try { await env.ONLINE_KV.put(lkey, JSON.stringify({ name, gameId, anon, ip, version: v, lastSeen: now, geo }), { expirationTtl: LIVE_TTL_S }); } catch (e) {} // KV 配额满时跳过写（避免 500）
       }
       // 历史（累计，不设 TTL：firstSeen 保留、count 累加；节流写入省配额）
       const hkey = 'hist:' + key;
@@ -192,7 +236,7 @@ export default {
       if (v) h.lastVersion = v;
       if (geo) h.geo = geo;
       if (isNew || (now - prevHistSeen) >= HIST_THROTTLE_MS) {
-        await env.ONLINE_KV.put(hkey, JSON.stringify(h));
+        try { await env.ONLINE_KV.put(hkey, JSON.stringify(h)); } catch (e) {} // KV 配额满时跳过写（避免 500）
       }
       return json({ status: 'ok' });
     }

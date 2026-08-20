@@ -5,6 +5,7 @@
 // 敌机：普通(2血/+10) / SEAD(2血/+15，开雷达时射导弹，关雷达其导弹失锁乱飞) / 干扰机(2血/+20，在场时射速变慢) / B2隐身(3血/+30)
 // 炮击：固定间隔轰炸阵地当前位置（4 秒预警圈）；防空无血量，被命中即结算（密集阵可挡一次）
 (function () {
+  const gT = (k, v) => (window.I18N && I18N.t) ? I18N.t(k, v) : k;
   const $ = (id) => document.getElementById(id);
   let canvas = null, ctx = null, W = 0, H = 0, raf = 0;
   let running = false;
@@ -278,14 +279,14 @@
   }
   function pickUpgrades() {
     const pool = [];
-    if (state.fireCd > 0.55) pool.push({ id: 'fire', label: '⚡ 射速+25%', desc: '导弹冷却缩短', apply: () => { state.fireCd *= 0.75; } });
-    if (state.volley < 3) pool.push({ id: 'volley', label: '🎯 齐射+1', desc: '每轮多发一枚（分散目标）', apply: () => { state.volley++; } });
-    if (state.guide < 3) pool.push({ id: 'guide', label: '🚀 制导增强', desc: '导弹更快、命中判定更大', apply: () => { state.guide++; } });
-    if (state.splash < 1) pool.push({ id: 'splash', label: '💣 近炸引信', desc: '命中溅射周围敌机', apply: () => { state.splash = 1; } });
-    if (state.range < 400) pool.push({ id: 'range', label: '📡 射程+70', desc: '索敌距离增大', apply: () => { state.range += 70; } });
-    if (state.moveSpeed < 878) pool.push({ id: 'move', label: '🚚 机动强化', desc: '阵地移速×1.5', apply: () => { state.moveSpeed *= 1.5; } });
-    if (state.ciws < 3) pool.push({ id: 'ciws', label: '🛡 密集阵', desc: '挡一次致命伤害', apply: () => { state.ciws++; } });
-    if (state.spinupBase > 0.1) pool.push({ id: 'quick', label: '⏱ 雷达快启', desc: '开机延迟减半', apply: () => { state.spinupBase = Math.max(0.1, state.spinupBase / 2); } });
+    if (state.fireCd > 0.55) pool.push({ id: 'fire', label: gT('game.upFire'), desc: gT('game.upFireDesc'), apply: () => { state.fireCd *= 0.75; } });
+    if (state.volley < 3) pool.push({ id: 'volley', label: gT('game.upVolley'), desc: gT('game.upVolleyDesc'), apply: () => { state.volley++; } });
+    if (state.guide < 3) pool.push({ id: 'guide', label: gT('game.upGuide'), desc: gT('game.upGuideDesc'), apply: () => { state.guide++; } });
+    if (state.splash < 1) pool.push({ id: 'splash', label: gT('game.upSplash'), desc: gT('game.upSplashDesc'), apply: () => { state.splash = 1; } });
+    if (state.range < 400) pool.push({ id: 'range', label: gT('game.upRange'), desc: gT('game.upRangeDesc'), apply: () => { state.range += 70; } });
+    if (state.moveSpeed < 878) pool.push({ id: 'move', label: gT('game.upMove'), desc: gT('game.upMoveDesc'), apply: () => { state.moveSpeed *= 1.5; } });
+    if (state.ciws < 3) pool.push({ id: 'ciws', label: gT('game.upCiws'), desc: gT('game.upCiwsDesc'), apply: () => { state.ciws++; } });
+    if (state.spinupBase > 0.1) pool.push({ id: 'quick', label: gT('game.upQuick'), desc: gT('game.upQuickDesc'), apply: () => { state.spinupBase = Math.max(0.1, state.spinupBase / 2); } });
     return pool.sort(() => Math.random() - 0.5).slice(0, 3);
   }
   function chooseUpgrade(opt) {
@@ -303,33 +304,33 @@
     if (sc > best) { localStorage.setItem('ba_game_best', String(sc)); }
     const k = state.kills;
     $('gameOverStats').innerHTML =
-      `总击杀 <b>${k.total}</b>（普通 ${k.normal} ｜ SEAD ${k.sead} ｜ 干扰 ${k.jam} ｜ B2 ${k.b2}）<br>` +
-      `坚持了 <b>${fmtTime(state.t)}</b> ｜ 本次得分 <b>${sc}</b> ｜ 历史最高 <b>${Math.max(best, sc)}</b>`;
+      gT('game.killsLine', { total: k.total, normal: k.normal, sead: k.sead, jam: k.jam, b2: k.b2 }) + '<br>' +
+      gT('game.survivedLine', { t: fmtTime(state.t), sc: sc, best: Math.max(best, sc) });
     $('gameOver').classList.remove('hidden');
   }
   function fmtTime(t) {
     const s = Math.floor(t), m = Math.floor(s / 60);
-    return m + ' 分 ' + (s % 60) + ' 秒';
+    return gT('game.durFmt', { m: m, s: s % 60 });
   }
 
   function radarLabel() {
-    if (state.on) return '🟢 开';
-    if (state.spinup > 0) return '🟡 开机中…';
-    return '🔴 关';
+    if (state.on) return gT('game.radarOn');
+    if (state.spinup > 0) return gT('game.radarSpinup');
+    return gT('game.radarOff');
   }
   function renderHud() {
     const hud = $('gameHud');
     if (!hud) return;
     const jamActive = state.planes.some((p) => p.type === 'jam' && !p.gone);
     hud.innerHTML =
-      `<span>雷达 <b class="${state.on ? 'hud-on' : 'hud-off'}">${radarLabel()}</b></span>` +
-      `${state.ciws ? `<span>🛡 密集阵×${state.ciws}</span>` : ''}` +
-      `<span>得分 <b>${Math.round(state.score)}</b></span>` +
-      `<span>时间 <b>${fmtTime(state.t)}</b></span>` +
-      `<span>升级 <b>${state.kills.total}/${state.nextUpgradeAt}</b></span>` +
-      (jamActive ? '<span style="color:var(--warn)">📡 干扰中</span>' : '') +
-      `<span>射速 <b>${state.fireCd.toFixed(1)}s/发</b> 齐射×${state.volley}${state.guide ? ' 制导' + state.guide : ''}${state.splash ? ' 近炸' : ''}</span>` +
-      (state.moving ? '<span style="color:var(--warn)">🚚 移动中（到位后按 Z 开机）</span>' : '');
+      `<span>${gT('game.hudRadar')} <b class="${state.on ? 'hud-on' : 'hud-off'}">${radarLabel()}</b></span>` +
+      `${state.ciws ? `<span>${gT('game.hudCiws', { n: state.ciws })}</span>` : ''}` +
+      `<span>${gT('game.hudScore')} <b>${Math.round(state.score)}</b></span>` +
+      `<span>${gT('game.hudTime')} <b>${fmtTime(state.t)}</b></span>` +
+      `<span>${gT('game.hudUpgrade')} <b>${state.kills.total}/${state.nextUpgradeAt}</b></span>` +
+      (jamActive ? '<span style="color:var(--warn)">' + gT('game.hudJam') + '</span>' : '') +
+      `<span>${gT('game.hudFireRate')} <b>${state.fireCd.toFixed(1)}s</b> ${gT('game.hudVolley', { n: state.volley })}${state.guide ? gT('game.hudGuide', { n: state.guide }) : ''}${state.splash ? gT('game.hudSplash') : ''}</span>` +
+      (state.moving ? '<span style="color:var(--warn)">' + gT('game.hudMoving') + '</span>' : '');
   }
 
   function draw() {
@@ -347,7 +348,7 @@
         ctx.setLineDash([]);
         ctx.fillStyle = 'rgba(245,185,66,.15)'; ctx.beginPath(); ctx.arc(a.x, H - 28, 44, 0, Math.PI * 2); ctx.fill();
         ctx.fillStyle = '#f5b942'; ctx.font = '11px sans-serif'; ctx.textAlign = 'center';
-        ctx.fillText('⚠ 炮击 ' + Math.ceil(a.warn) + 's', a.x, H - 66);
+        ctx.fillText(gT('game.canvasShelling', { s: Math.ceil(a.warn) }), a.x, H - 66);
       } else if (a.impact) {
         ctx.fillStyle = a.hit ? 'rgba(255,107,107,.5)' : 'rgba(245,185,66,.25)';
         ctx.beginPath(); ctx.arc(a.x, H - 28, 40, 0, Math.PI * 2); ctx.fill();
@@ -385,8 +386,8 @@
     ctx.beginPath(); ctx.moveTo(state.x, H - 42); ctx.lineTo(state.x - 18, H - 16); ctx.lineTo(state.x + 18, H - 16); ctx.closePath(); ctx.fill();
     ctx.fillRect(state.x - 12, H - 14, 24, 7);
     ctx.restore();
-    if (state.moving) { ctx.fillStyle = '#f5b942'; ctx.font = '11px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('移动中…', state.x, H - 50); }
-    else if (state.spinup > 0) { ctx.fillStyle = '#f5b942'; ctx.font = '11px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('开机中…', state.x, H - 50); }
+    if (state.moving) { ctx.fillStyle = '#f5b942'; ctx.font = '11px sans-serif'; ctx.textAlign = 'center'; ctx.fillText(gT('game.canvasMoving'), state.x, H - 50); }
+    else if (state.spinup > 0) { ctx.fillStyle = '#f5b942'; ctx.font = '11px sans-serif'; ctx.textAlign = 'center'; ctx.fillText(gT('game.canvasSpinup'), state.x, H - 50); }
   }
 
   function bind() {
