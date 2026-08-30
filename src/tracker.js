@@ -5,6 +5,17 @@ const MAX_MATCHES = 500;      // matches 表上限（按对局时间淘汰）
 const MAX_PLAYERS = 5000;     // players 表上限（按最近出现淘汰）
 const NUM_FID = /^\d+$/;
 
+// /api/players/matches 的 Data 字段是字符串（如 "@{8863=; 19191=; ...}"，C# 字典 ToString 残留），
+// 解析出全部玩家 ID 为 { id: { Id: id } } 的最小结构（名字/队伍等由日志或惰性详情补齐）
+function parseDataString(s) {
+  const out = {};
+  if (typeof s !== 'string') return out;
+  const re = /(\d+)\s*=/g;
+  let m;
+  while ((m = re.exec(s)) !== null) out[m[1]] = { Id: m[1], _str: true }; // _str: 字符串来源，无队伍/名字，勿参与队伍判定
+  return out;
+}
+
 // 本地玩家追踪库 v2：以「对局」为中心，对局 ID 为唯一键。
 // matches: fid -> { fid, mapId, map, endTime, durationSec, winnerTeam(0|1|null), localWon(bool|null), localTeam, custom(bool|null), players:[{id,name,teamId,team,oldRating,newRating}], source, firstSeenAt, syncedAt }
 // players: id -> { id, names:[{name,firstSeen,lastSeen}], firstSeen, lastSeen, lobbySeen }
@@ -241,6 +252,17 @@ class PlayerTracker {
     return out;
   }
 
+  // 删除单场对局记录（手动收录错 / 不想要的局）
+  deleteMatch(fid) {
+    if (fid == null) return false;
+    const k = String(fid);
+    if (!this.data.matches[k]) return false;
+    delete this.data.matches[k];
+    this._evict();
+    this._flush();
+    return true;
+  }
+
   // 删除指定账号：移除账号记录 + 该账号为“本机玩家”的对局 + 玩家表里该 id 的记录
   deleteAccount(id) {
     const k = String(id);
@@ -340,7 +362,7 @@ class PlayerTracker {
       const fid = raw && raw.matchId != null ? String(raw.matchId) : '';
       if (!NUM_FID.test(fid)) continue;
       const d = (raw && raw.data) || {};
-      const data = (d.Data && typeof d.Data === 'object') ? d.Data : {};
+      const data = (d.Data && typeof d.Data === 'object') ? d.Data : parseDataString(d.Data); // /api/players/matches 的 Data 是 "@{id=; id=; ...}" 字符串，需解析成 {id:{Id}}
       const existed = !!this.data.matches[fid];
       const recPrev = existed ? this.data.matches[fid] : null;
       const lid = this.data.localId;
@@ -365,7 +387,7 @@ class PlayerTracker {
         if (tid === 1) return { teamId: 1, team: 'Bravo' };
         return { teamId: 0, team: 'Alpha' };
       };
-      const localNorm = me ? normalizeTeam(me.TeamId) : { teamId: null, team: null };
+      const localNorm = me ? (me._str ? { teamId: null, team: null } : normalizeTeam(me.TeamId)) : { teamId: null, team: null };
       const localTeamId = localNorm.teamId;           // 0|1|100（观战=100）
       const localSpectator = localTeamId === 100;
       const mode = d.Type != null ? 'custom' : 'ranked'; // Type 无=排位、有(1/3)=自定义
@@ -383,7 +405,7 @@ class PlayerTracker {
       const durationSec = d.TotalPlayTimeInSec != null ? d.TotalPlayTimeInSec : null;
 
       const players = Object.values(data).map((x) => {
-        const n = normalizeTeam(x.TeamId);
+        const n = x._str ? { teamId: null, team: null } : normalizeTeam(x.TeamId);
         return {
           id: String(x.Id),
           name: x.Name != null ? String(x.Name) : '',
@@ -400,6 +422,14 @@ class PlayerTracker {
         };
       });
 
+      const seenAt = endTime || at;
+      for (const pl of players) {
+        if (pl.id == null || pl.id === '') continue;
+        const p = this._player(pl.id);
+        if (pl.name) this._observeName(p, pl.name, seenAt);
+        if (!p.firstSeen) p.firstSeen = seenAt;
+        p.lastSeen = Math.max(p.lastSeen || 0, seenAt);
+      }
       const rec = this.data.matches[fid] || {
         fid, mapId: null, map: '', endTime: null, durationSec: null,
         winnerTeam: null, localWon: null, localTeam: null, custom: null,
@@ -584,6 +614,8 @@ class PlayerTracker {
     }
     const mode = mi.Type != null ? 'custom' : 'ranked';
     if (mode) { rec.mode = mode; rec.custom = mode === 'custom'; }
+    // 拉到真实 API 数据 → 不是重开局：清掉「已重开」标记（旧 API 报错期间误标的正常局，刷新按钮可救回）
+    rec.restarted = false;
     if (mi.MapId != null) rec.mapId = mi.MapId;
     if (!rec.map || /^map:\d+$/.test(rec.map)) rec.map = mi.MapId != null ? ('map:' + mi.MapId) : rec.map;
     if (mi.EndTime) rec.endTime = mi.EndTime * 1000;
@@ -603,6 +635,14 @@ class PlayerTracker {
       if (x.Name != null && x.Name !== '') pl.name = String(x.Name);
       pl.teamId = tid;
       pl.team = tid === 100 ? 'Spectators' : tid === 1 ? 'Bravo' : 'Alpha';
+      // 登记到 players 表：否则 API/手动收录的对局不会出现在「封禁 encountered / 我遇到过的作弊者 / 玩家历史」里
+      {
+        const seenAt = rec.endTime || Date.now();
+        const pp = this._player(pid);
+        if (pl.name) this._observeName(pp, pl.name, seenAt);
+        if (!pp.firstSeen) pp.firstSeen = seenAt;
+        pp.lastSeen = Math.max(pp.lastSeen || 0, seenAt);
+      }
       if (typeof x.OldRating === 'number') pl.oldRating = x.OldRating;
       if (typeof x.NewRating === 'number') pl.newRating = x.NewRating;
       if (typeof x.DestructionScore === 'number') pl.destructionScore = x.DestructionScore;
@@ -782,4 +822,4 @@ class PlayerTracker {
   }
 }
 
-module.exports = { PlayerTracker, MAX_MATCHES, MAX_PLAYERS, winnerTeamFromMatch: PlayerTracker.winnerTeamFromMatch };
+module.exports = { PlayerTracker, MAX_MATCHES, MAX_PLAYERS, winnerTeamFromMatch: PlayerTracker.winnerTeamFromMatch, parseDataString };

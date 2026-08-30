@@ -28,6 +28,7 @@ contextBridge.exposeInMainWorld('rec', {
   computeCanvasSize: (q, vw, vh, crop) => computeCanvasSize(q, vw, vh, crop),
   onStop: (cb) => ipcRenderer.on('replay:recorder:stop', (e, d) => cb(d)),
   save: (payload) => ipcRenderer.invoke('replay:recorder:save', payload),
+  chunk: (data) => ipcRenderer.send('replay:recorder:chunk', data),
   progress: (p) => ipcRenderer.send('replay:recorder:progress', p),
   preview: (payload) => ipcRenderer.send('replay:recorder:preview', payload)
 });

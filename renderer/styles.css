@@ -480,6 +480,16 @@ table.matches tbody tr:hover { background: var(--row-hover); }
 #apmCard.collapsed #apmBody { display: none; }
 .card-toggle { padding: 3px 10px; font-size: 13px; line-height: 1; }
 #apmCard.collapsed .card-toggle { transform: rotate(-90deg); }
+/* 卡组工具可收起（与 APM 卡一致） */
+#deckCard.collapsed > :not(.card-head) { display: none; }
+#deckCard.collapsed .card-toggle { transform: rotate(-90deg); }
+/* 对局档案：手动收录对局 ID */
+.archive-add input { flex: 1; min-width: 0; }
+/* 设置：面板次序 */
+.panel-order-list { display: flex; flex-direction: column; gap: 6px; margin: 6px 0 4px; }
+.panel-order-row { display: flex; align-items: center; gap: 10px; background: var(--card2); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; font-size: 13px; }
+.panel-order-row .pn-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.panel-order-row .btn-xs { padding: 2px 8px; font-size: 12px; line-height: 1.4; }
 .apm-live { text-align: center; padding: 14px 0 6px; }
 .apm-bignum { font-size: 56px; font-weight: 800; color: var(--accent); font-variant-numeric: tabular-nums; line-height: 1.1; text-shadow: 0 6px 24px var(--accent-glow); }
 .apm-live-label { font-size: 12px; color: var(--dim); }

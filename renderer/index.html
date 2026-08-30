@@ -34,6 +34,11 @@
   </header>
 
   <main>
+    <div id="batraceGateBanner" class="update-banner hidden">
+      <span id="batraceGateText"></span>
+      <button id="btnBatraceGateClose" class="btn btn-ghost light">✕</button>
+    </div>
+
     <div id="updateBanner" class="update-banner hidden">
       <span id="updateText"></span>
       <button id="btnUpdateDownload" class="btn btn-ghost light" data-i18n="common.downloadNew">⬇ 下载新版本</button>
@@ -71,12 +76,13 @@
     </section>
 
     <!-- 卡组工具：两列同栏 -->
-    <section class="card">
+    <section class="card" id="deckCard">
       <div class="card-head">
         <h2 data-i18n="card.deck">🃏 卡组工具（断箭的卡组）</h2>
         <div class="head-right">
           <span id="deckPaths" class="dim"></span>
           <button id="btnDeckRefresh" class="btn btn-ghost" data-i18n="common.refresh">↻ 刷新</button>
+          <button id="btnDeckToggle" class="btn btn-ghost card-toggle" data-i18n-title="apm.toggle">▾</button>
         </div>
       </div>
       <div id="deckSyncAlert" class="sync-alert hidden">
@@ -122,7 +128,7 @@
     </section>
 
     <!-- 玩家查询：搜索 → 粗查预览 → 蛆指数 -->
-    <section class="card">
+    <section class="card" id="maggotCard">
       <div class="card-head">
         <h2 data-i18n="card.maggot">🔍 玩家查蛆指数</h2>
         <span id="maggotCalls" class="dim"></span>
@@ -156,10 +162,14 @@
     </section>
 
     <!-- 对局档案 + 行车记录仪（两栏布局） -->
-    <div class="split">
-      <section class="card">
+    <div class="split" id="archiveSplit">
+      <section class="card" id="archiveCard">
         <div class="card-head">
           <h2 data-i18n="card.archive">🗂 对局档案</h2>
+        </div>
+        <div class="search-row archive-add">
+          <input id="addMatchFid" type="text" data-i18n-placeholder="archive.addPh" placeholder="手动收录对局 ID" />
+          <button id="btnAddMatch" class="btn btn-ghost" data-i18n="archive.add">收录</button>
         </div>
         <div id="archiveList" class="archive-list"></div>
       </section>
@@ -265,6 +275,10 @@
       <label class="check"><input id="setMatchSync" type="checkbox" /> <span data-i18n="settings.matchSync">每小时同步我的对局记录（用于玩家追踪回填相遇/胜负/改名史）</span></label>
       <label class="check"><input id="setBanCard" type="checkbox" /> <span data-i18n="settings.banCard">显示封禁追踪栏目（默认隐藏）</span></label>
       <label class="check"><input id="setMultiBond" type="checkbox" /> <span data-i18n="settings.multiBond">多账号联动羁绊检查（换号也视为同一人，默认开）</span></label>
+      <div class="panel-order-block">
+        <div class="test-title dim" data-i18n="settings.panelOrderTitle">📐 面板次序（上移/下移调整首页栏目顺序）</div>
+        <div id="panelOrderList" class="panel-order-list"></div>
+      </div>
       <div class="replay-local-block">
         <div class="test-title dim" data-i18n="settings.localReplayTitle">📼 本地录像管理（清理只删本地录像文件）</div>
         <div id="localReplayInfo" class="dim"></div>

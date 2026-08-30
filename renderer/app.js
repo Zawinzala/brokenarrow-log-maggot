@@ -486,6 +486,22 @@ function renderArchive(list) {
   });
 }
 
+// 手动收录对局 ID：拉取 BATrace /api/match 写入追踪库并刷新档案
+async function addMatchByFid() {
+  const input = $('addMatchFid');
+  const fid = (input && input.value || '').trim();
+  if (!/^\d+$/.test(fid)) { setStatus(I18N.t('archive.addInvalid'), false); return; }
+  try {
+    const r = await BA.addMatchByFid(fid);
+    setStatus((r && r.message) || I18N.t('status.refreshed'), !!(r && r.ok));
+    if (r && r.ok) {
+      if (input) input.value = '';
+      const mm = await BA.getTrackerMatches();
+      renderArchive(mm && mm.list);
+    }
+  } catch (e) { setStatus(I18N.t('status.refreshFail', { msg: e.message }), false); }
+}
+
 // 从对局档案的 📹 打开录像：单个直接播；多个本地文件弹列表选择
 async function openReplayForFid(fid) {
   try {
@@ -602,7 +618,9 @@ function renderMatchDetail(d) {
     groups[g].push(p);
   }
   const playerRow = (p) => {
-    const delta = (p.oldRating != null && p.newRating != null) ? fmtDelta(p.newRating - p.oldRating) : '-';
+    const delta = (p.oldRating != null && p.newRating != null) ? fmtDelta(p.newRating - p.oldRating) : null;
+    const eloVal = p.newRating != null ? fmtElo(p.newRating) : (p.oldRating != null ? fmtElo(p.oldRating) : null);
+    const eloC = eloVal != null ? (delta != null ? eloVal + ' (' + delta + ')' : eloVal) : (delta != null ? delta : '-');
     const score = p.destructionScore != null ? p.destructionScore + '/' + (p.lossesScore ?? '-') : '-';
     const obj = p.objectivesCaptured != null ? p.objectivesCaptured : '-';
     const k = p.killed != null ? p.killed : '-';
@@ -615,7 +633,7 @@ function renderMatchDetail(d) {
     return `<tr data-id="${esc(p.id)}" data-name="${esc(p.name || '')}" data-link="${PLAYER_URL(p.id)}" title="${I18N.t('inv.rightClickInv')}">
       <td><b>${esc(p.name || I18N.t('common.unknown'))}</b></td>
       <td class="dim md-id-cell"><span class="md-id">${esc(p.id)}</span></td>
-      <td>${delta}</td>
+      <td>${eloC}</td>
       <td class="dim">${score}</td>
       <td class="dim">${obj}</td>
       <td class="dim">${k}</td>
@@ -863,6 +881,13 @@ function renderApmIdle() {
   if (body) body.innerHTML = '<div class="apm-empty dim">' + I18N.t('apm.idleHint') + '</div>';
 }
 
+function setDeckCollapsed(collapsed) {
+  const card = $('deckCard');
+  if (!card) return;
+  card.classList.toggle('collapsed', !!collapsed);
+  const btn = $('btnDeckToggle');
+  if (btn) btn.title = collapsed ? I18N.t('apm.expand') : I18N.t('apm.collapse');
+}
 function setApmCollapsed(collapsed) {
   const card = $('apmCard');
   if (!card) return;
@@ -890,6 +915,8 @@ function openSettings() {
     $('setMultiBond').checked = !!cfg.multiAccountBond;
     refreshAccountList();
     refreshLocalReplayList();
+    panelOrder = normPanelOrder(cfg.panelOrder);
+    renderPanelOrderList();
     savedTheme = cfg.theme || 'dark';
     setThemePicker(savedTheme);
     $('dirHint').textContent = '';
@@ -981,6 +1008,19 @@ document.addEventListener('contextmenu', (e) => {
   }
   if (t.dataset.fid) {
     items.push({ label: I18N.t('ctx.refreshMatch'), action: () => refreshMatchRow(t.dataset.fid) });
+    // 对局档案行：右键可直接删除不要的对局记录（如手动收录错）
+    if (t.classList && t.classList.contains('archive-row')) {
+      items.push({ label: I18N.t('ctx.deleteMatch'), action: async () => {
+        const ok = await askConfirm(I18N.t('confirm.deleteMatch'));
+        if (!ok) return;
+        try {
+          const r = await BA.deleteMatch(t.dataset.fid);
+          setStatus((r && r.message) || I18N.t('status.deleted'), !!(r && r.ok));
+          const mm = await BA.getTrackerMatches();
+          renderArchive(mm && mm.list);
+        } catch (err) { setStatus(I18N.t('status.deleteFailed', { msg: err.message }), false); }
+      } });
+    }
   }
   items.push({ label: I18N.t('ctx.openBatrace'), action: () => openLink(t.dataset.link) });
   showCtx(e.clientX, e.clientY, items);
@@ -1145,7 +1185,9 @@ function renderInvestigate(p) {
         <span class="dim">${m.endTime ? fmtTime(m.endTime) : ''}</span>
         ${m.eloDelta != null ? `<span class="dim">${fmtDelta(m.eloDelta)}</span>` : ''}
       </div>`).join('')
-    : '<span class="dim">' + I18N.t('inv.noRecent') + '</span>';
+    : (p.recentError
+      ? '<span class="loss" title="' + esc(p.recentError) + '">' + esc(I18N.t('inv.recentError')) + '</span>'
+      : '<span class="dim">' + I18N.t('inv.noRecent') + '</span>');
 
   const enc = p.encounters || [];
   $('invEncounters').innerHTML = enc.length
@@ -1722,6 +1764,9 @@ function bindUI() {
   on('btnGame', 'click', () => { if (window.BAGame) BAGame.open(); });
   on('btnSettings', 'click', openSettings);
   on('btnApmToggle', 'click', () => setApmCollapsed(!$('apmCard').classList.contains('collapsed')));
+  on('btnDeckToggle', 'click', () => setDeckCollapsed(!$('deckCard').classList.contains('collapsed')));
+  on('btnAddMatch', 'click', addMatchByFid);
+  on('addMatchFid', 'keydown', (e) => { if (e.key === 'Enter') addMatchByFid(); });
   on('btnCancel', 'click', () => { setThemePicker(savedTheme); $('settingsModal').classList.add('hidden'); });
   on('btnSave', 'click', saveSettings);
   on('btnBrowse', 'click', async () => {
@@ -1770,6 +1815,7 @@ function bindUI() {
     runMaggot(lastReport.id, lastReport.name);
   });
   on('btnUpdateClose', 'click', () => $('updateBanner').classList.add('hidden'));
+  on('btnBatraceGateClose', 'click', () => { const b = $('batraceGateBanner'); if (b) b.classList.add('hidden'); });
   on('btnUpdateDownload', 'click', () => { if (lastVersionInfo && lastVersionInfo.url) openLink(lastVersionInfo.url); });
   on('btnAnnouncementClose', 'click', () => $('announcementModal').classList.add('hidden'));
   const link = (id, url) => { const el = $(id); if (el) el.addEventListener('click', (e) => { e.preventDefault(); openLink(url); }); };
@@ -1958,6 +2004,65 @@ function bindUI() {
   });
 }
 
+
+// ---------- 首页面板次序 ----------
+const PANELS = [
+  { key: 'current', id: 'currentCard', label: () => I18N.t('card.current') },
+  { key: 'deck', id: 'deckCard', label: () => I18N.t('card.deck') },
+  { key: 'maggot', id: 'maggotCard', label: () => I18N.t('card.maggot') },
+  { key: 'ban', id: 'banCard', label: () => I18N.t('card.ban') },
+  { key: 'archive', id: 'archiveSplit', label: () => I18N.t('card.archive') + ' / ' + I18N.t('card.replay') },
+  { key: 'about', id: 'aboutCard', label: () => I18N.t('card.about') }
+];
+const PANEL_KEYS = PANELS.map((p) => p.key);
+let panelOrder = []; // 当前生效顺序（空 = 默认 DOM 顺序）
+
+function normPanelOrder(order) {
+  if (!Array.isArray(order)) return [];
+  const uniq = order.filter((k) => PANEL_KEYS.includes(k)).filter((k, i, a) => a.indexOf(k) === i);
+  for (const k of PANEL_KEYS) if (!uniq.includes(k)) uniq.push(k); // 补齐缺失面板
+  return uniq;
+}
+function applyPanelOrder(order) {
+  panelOrder = normPanelOrder(order || []);
+  const main = document.querySelector('main');
+  if (!main || !panelOrder.length) return;
+  for (const k of panelOrder) {
+    const p = PANELS.find((x) => x.key === k);
+    if (!p) continue;
+    const el = $(p.id);
+    if (el && el.parentNode === main) main.appendChild(el);
+  }
+}
+function renderPanelOrderList() {
+  const list = $('panelOrderList');
+  if (!list) return;
+  const order = normPanelOrder(panelOrder.length ? panelOrder : PANEL_KEYS);
+  list.innerHTML = order.map((k, i) => {
+    const p = PANELS.find((x) => x.key === k);
+    return `<div class="panel-order-row" data-key="${k}">
+      <span class="pn-label">${esc(p ? p.label() : k)}</span>
+      <button type="button" class="btn btn-ghost btn-xs" data-move="up" ${i === 0 ? 'disabled' : ''}>↑</button>
+      <button type="button" class="btn btn-ghost btn-xs" data-move="down" ${i === order.length - 1 ? 'disabled' : ''}>↓</button>
+    </div>`;
+  }).join('');
+  list.querySelectorAll('.panel-order-row').forEach((row) => {
+    const move = (dir) => {
+      const cur = normPanelOrder(panelOrder.length ? panelOrder : PANEL_KEYS);
+      const idx = cur.indexOf(row.dataset.key);
+      const j = dir === 'up' ? idx - 1 : idx + 1;
+      if (idx < 0 || j < 0 || j >= cur.length) return;
+      const t = cur[idx]; cur[idx] = cur[j]; cur[j] = t;
+      panelOrder = cur;
+      renderPanelOrderList();
+    };
+    const up = row.querySelector('[data-move="up"]');
+    const down = row.querySelector('[data-move="down"]');
+    if (up) up.addEventListener('click', () => move('up'));
+    if (down) down.addEventListener('click', () => move('down'));
+  });
+}
+
 async function saveSettings() {
   const dir = $('setLogDir').value.trim();
   const v = await BA.validateDir(dir);
@@ -1970,7 +2075,8 @@ async function saveSettings() {
     matchSyncEnabled: $('setMatchSync').checked,
     banCardVisible: $('setBanCard').checked,
     multiAccountBond: $('setMultiBond').checked,
-    theme: currentTheme
+    theme: currentTheme,
+    panelOrder: normPanelOrder(panelOrder.length ? panelOrder : PANEL_KEYS)
   });
   savedTheme = currentTheme;
   setApmVisible($('setInputHook').checked);
@@ -2022,6 +2128,7 @@ async function init() {
   I18N.onChange(applyLangUI);
   setApmVisible(!!cfg.inputHookEnabled);
   setBanCardVisible(!!cfg.banCardVisible);
+  applyPanelOrder(cfg.panelOrder);
   const repSw = $('setReplayEnabled'); if (repSw) repSw.checked = !!cfg.replayEnabled;
   refreshReplayFids();
   renderReplayList();
@@ -2087,6 +2194,24 @@ async function init() {
   BA.onApmIdle(renderApmIdle);
   BA.onBudget(renderBudget);
   BA.getUsage().then(renderBudget).catch(() => {});
+  // BATrace 人机验证横幅：弹出验证窗口/完成/取消时提示
+  if (BA.onBatraceGate) BA.onBatraceGate((state) => {
+    const b = $('batraceGateBanner');
+    if (!b) return;
+    const txt = $('batraceGateText');
+    if (state === 'open') {
+      txt.textContent = I18N.t('status.batraceVerifyOpen');
+      b.classList.remove('hidden');
+    } else if (state === 'done') {
+      txt.textContent = I18N.t('status.batraceVerifyDone');
+      b.classList.remove('hidden');
+      setTimeout(() => b.classList.add('hidden'), 4000);
+    } else {
+      txt.textContent = I18N.t('status.batraceVerifyCancel');
+      b.classList.remove('hidden');
+      setTimeout(() => b.classList.add('hidden'), 6000);
+    }
+  });
   BA.onHeartbeat(renderHeartbeat);
   BA.getHeartbeat().then(renderHeartbeat).catch(() => {});
   BA.onApiHealth(renderApiHealth);

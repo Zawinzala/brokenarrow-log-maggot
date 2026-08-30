@@ -16,13 +16,15 @@ const DEFAULTS = {
   // 真实输入统计（全局鼠标+键盘钩子，默认关闭，反作弊风险自担）
   inputHookEnabled: false,
   // 24 小时 API 调用配额上限（超过后当天不再请求）
-  apiDailyLimit: 240,
+  apiDailyLimit: 400,
   // 心跳统计（匿名 ID + 版本号；作者自建服务器，可在设置里关闭）
   heartbeatEnabled: true,
   // 界面主题：dark / light / cyan / orange
   theme: 'dark',
   // 界面语言：zh / en / ja / ru（核心界面四语）
   lang: 'zh',
+  // 首页面板次序：['current','deck','maggot','ban','archive','about']；空数组 = 默认 DOM 顺序
+  panelOrder: [],
   // 封禁监控：每小时检查封禁名单并提醒新增
   banPollEnabled: true,
   // 每小时同步本机最近对局（用于玩家追踪回填）

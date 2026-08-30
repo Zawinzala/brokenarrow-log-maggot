@@ -4,6 +4,7 @@
 //   取最近 12 场“带 ELO 变动的有效对局”，按每局在己方队伍内的 MVP 名次（1=队内最强）求平均，
 //   经余弦平滑曲线映射到 1.0–10.0。详见 buildMaggotReport。
 const path = require('path');
+const { parseDataString } = require('./tracker');
 
 // 地图名注册表：从 analysis 响应的 mapPerformance 免费收集真实地图名
 const MAP_NAMES = { 3: 'Baltiisk', 4: 'Coast', 6: 'River', 7: 'Dam', 9: 'Airport', 10: 'Frontiers', 11: 'Central Village', 12: 'Oil refinery', 13: 'Suwalki', 16: 'Klaipeda', 17: 'Ruda', 20: 'Parnu', 21: 'Chernyakhovsk', 22: 'Ignalina Powerplant' };
@@ -311,4 +312,37 @@ class Analyzer {
   }
 }
 
-module.exports = { Analyzer, mapName, mapIdFromName, registerMapNames, MAP_NAMES, MAGGOT_LEVELS };
+// 把 /api/players/matches 的 matches 数组解析成「最近对局」列表（Data 为对象或字符串都支持）
+// 每项: { fid, map, endTime, eloDelta, won, teamId, custom, newRating }；teamId 只在有真实 TeamId 时给出，缺失=null（不猜队伍）
+function recentMatchesFromApi(matches, id, mapNameFn) {
+  const out = [];
+  const list = Array.isArray(matches) ? matches : [];
+  const mapName = typeof mapNameFn === 'function' ? mapNameFn : ((x) => (x != null ? String(x) : ''));
+  for (const raw of list) {
+    const d = (raw && raw.data) || {};
+    const data = (d.Data && typeof d.Data === 'object') ? d.Data : parseDataString(d.Data);
+    const me = data[String(id)] || Object.values(data).find((x) => x && String(x.Id) === String(id));
+    if (!me) continue;
+    const oldR = typeof me.OldRating === 'number' ? me.OldRating : null;
+    const newR = typeof me.NewRating === 'number' ? me.NewRating : null;
+    const hasRating = oldR != null && newR != null;
+    let won = null;
+    if (hasRating) { if (newR > oldR) won = true; else if (newR < oldR) won = false; }
+    const meTid = (me.TeamId === 1 || me.TeamId === 0 || me.TeamId === 100) ? me.TeamId : null;
+    if (won == null && d.WinnerTeam != null && meTid != null) won = (meTid === d.WinnerTeam);
+    const mapId = d.MapId != null ? d.MapId : null;
+    out.push({
+      fid: String(raw.matchId != null ? raw.matchId : ''),
+      map: mapId != null ? mapName(mapId) : '',
+      endTime: d.EndTime ? d.EndTime * 1000 : null,
+      eloDelta: hasRating ? Math.round((newR - oldR) * 10) / 10 : null,
+      won,
+      teamId: meTid,
+      custom: !hasRating,
+      newRating: newR
+    });
+  }
+  return out;
+}
+
+module.exports = { Analyzer, mapName, mapIdFromName, registerMapNames, MAP_NAMES, MAGGOT_LEVELS, recentMatchesFromApi };

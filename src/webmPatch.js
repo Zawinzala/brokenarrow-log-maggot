@@ -64,4 +64,35 @@ function patchWebmDuration(buf, durationSec) {
   } catch (e) { return buf; }
 }
 
-module.exports = { patchWebmDuration };
+// 大文件落盘版：不整段读入内存（录像几 GB 时避免 OOM），只读头部补 Duration，其余字节流式复制。
+// srcPath 头部前 HEAD_LEN 字节参与补丁（Info 元素就在文件开头几十字节内），补丁后从原 HEAD_LEN 处流式续写。
+async function patchWebmDurationFile(srcPath, destPath, durationSec) {
+  const fs = require('fs');
+  const HEAD_LEN = 64 * 1024;
+  return new Promise((resolve) => {
+    try {
+      const st = fs.statSync(srcPath);
+      if (!st || st.size <= 0) return resolve(false);
+      const headLen = Math.min(HEAD_LEN, st.size);
+      // 注意：fs.readFileSync 没有 length 选项（会整段读入），必须用 readSync 只读头部
+      const fd = fs.openSync(srcPath, 'r');
+      const head = Buffer.alloc(headLen);
+      fs.readSync(fd, head, 0, headLen, 0);
+      fs.closeSync(fd);
+      const patched = patchWebmDuration(head, durationSec);
+      const out = fs.createWriteStream(destPath);
+      out.on('error', () => resolve(false));
+      out.on('close', () => resolve(true));
+      out.write(patched);
+      if (st.size > headLen) {
+        const rest = fs.createReadStream(srcPath, { start: headLen });
+        rest.on('error', () => { try { out.destroy(); } catch (e) {} resolve(false); });
+        rest.pipe(out);
+      } else {
+        out.end();
+      }
+    } catch (e) { resolve(false); }
+  });
+}
+
+module.exports = { patchWebmDuration, patchWebmDurationFile };

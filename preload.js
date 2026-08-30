@@ -22,6 +22,7 @@ contextBridge.exposeInMainWorld('api', {
   onMatchPlayer: (cb) => ipcRenderer.on('match:player', (e, d) => cb(d)),
   onMatchDone: (cb) => ipcRenderer.on('match:done', (e, d) => cb(d)),
   onBudget: (cb) => ipcRenderer.on('budget', (e, d) => cb(d)),
+  onBatraceGate: (cb) => ipcRenderer.on('batrace:gate', (e, d) => cb(d)),
 
   // 查询
   searchPlayers: (q) => ipcRenderer.invoke('search:players', q),
@@ -58,6 +59,8 @@ contextBridge.exposeInMainWorld('api', {
   getTrackerMatches: () => ipcRenderer.invoke('tracker:matches'),
   getMatchDetail: (fid) => ipcRenderer.invoke('tracker:matchDetail', fid),
   refreshMatch: (fid) => ipcRenderer.invoke('tracker:refreshMatch', fid),
+  addMatchByFid: (fid) => ipcRenderer.invoke('tracker:addMatch', fid),
+  deleteMatch: (fid) => ipcRenderer.invoke('tracker:deleteMatch', fid),
   onBansChanged: (cb) => ipcRenderer.on('bans:changed', (e, d) => cb(d)),
   onBanAlert: (cb) => ipcRenderer.on('bans:alert', (e, d) => cb(d)),
   getCheaters: () => ipcRenderer.invoke('tracker:cheaters'),

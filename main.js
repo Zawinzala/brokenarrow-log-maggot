@@ -8,20 +8,21 @@ const { Config, detectSteamLogDir } = require('./src/config');
 const { LogParser } = require('./src/logParser');
 const { LogWatcher } = require('./src/logWatcher');
 const { BatraceClient, Cache, ApiUsage } = require('./src/batrace');
+const { ensureBatraceAccess, closeBatraceGate } = require('./src/batraceGate');
 const { Heartbeat } = require('./src/heartbeat');
 const { ApiHealth } = require('./src/apiHealth');
 const { ApmTracker } = require('./src/apm');
 const inputHook = require('./src/inputHook');
 const { createDeckSync, sanitizeAccount } = require('./src/deckSync');
 const { spawn } = require('child_process');
-const { Analyzer, mapName } = require('./src/analyzer');
+const { Analyzer, mapName, recentMatchesFromApi } = require('./src/analyzer');
 const { MatchArchive } = require('./src/storage');
 const { PlayerTracker, winnerTeamFromMatch } = require('./src/tracker');
 const { zipCreate, zipExtract } = require('./src/zip');
 const { ReplayRecorder } = require('./src/replayRecorder');
 const { encodeReplayKey } = require('./src/s3Client');
 const { localReplayList, localReplayDelete, localReplayClean, localReplayRead, uploaderMetaFor, enrichReplayMaps } = require('./src/replayLocal');
-const { patchWebmDuration } = require('./src/webmPatch');
+const { patchWebmDuration, patchWebmDurationFile } = require('./src/webmPatch');
 
 // 压制 Windows 图形捕获（WGC）启动采集时的 E_INVALIDARG 噪声日志（录制功能正常，该错误为 Chromium 良性误报）
 app.commandLine.appendSwitch('log-level', '4');
@@ -82,6 +83,7 @@ function createWindow() {
     win = null;
     // 用户关闭主窗口 = 退出应用：立即销毁隐藏的录制窗口，否则 window-all-closed 不触发、进程残留（下次 npm start 会冲突）
     if (replayRecorder) { try { replayRecorder.closeWindow(); } catch (e) {} }
+    closeBatraceGate(); // 关闭主窗口=退出：同时关闭人机验证窗口，避免进程残留
     setImmediate(() => { try { app.quit(); } catch (e) {} });
   });
 }
@@ -101,7 +103,11 @@ app.whenReady().then(() => {
     cache: new Cache(path.join(app.getPath('userData'), 'batrace-cache.json')),
     usage,
     extraHeaders: config.get().batraceExtraHeaders || {},
-    onUsage: () => send('budget', budgetPayload({}))
+    onUsage: () => send('budget', budgetPayload({})),
+    // 走 Electron 网络栈：与验证窗口共享同一 session cookie（人机验证 token）
+    fetchImpl: (u, o) => net.fetch(u, o),
+    // BATrace 新增人机验证（腾讯 EdgeOne）：检测到验证页时自动弹出验证窗口，完成后重试
+    onChallenge: () => ensureBatraceAccess({ force: true, onState: (s) => send('batrace:gate', s) })
   });
   analyzer = new Analyzer(client);
   archive = new MatchArchive(path.join(app.getPath('userData'), 'match-archive.json'));
@@ -114,7 +120,7 @@ app.whenReady().then(() => {
     // 只统计“对局进行中 + 游戏窗口在前台”的输入；钩子按需在 matchStart 时启动
     if (apm && apm.active && focusWatcher.isFocused()) apm.feedInput();
   });
-  apiHealth = new ApiHealth({ file: path.join(app.getPath('userData'), 'api-health.json') });
+  apiHealth = new ApiHealth({ file: path.join(app.getPath('userData'), 'api-health.json'), fetchImpl: (u, o) => net.fetch(u, o) });
   heartbeat = new Heartbeat({
     url: config.get().heartbeatUrl || '',
     uidFile: path.join(app.getPath('userData'), 'heartbeat-uid.txt'),
@@ -160,7 +166,7 @@ app.whenReady().then(() => {
   setInterval(() => probeApiHealth(), 3600 * 1000);
 });
 
-app.on('before-quit', () => { if (replayRecorder) { try { replayRecorder.abort(); } catch (e) {} } });
+app.on('before-quit', () => { if (replayRecorder) { try { replayRecorder.abort(); } catch (e) {} } closeBatraceGate(); });
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
@@ -282,7 +288,7 @@ function onParserEvent(type, data) {
         } else {
         replayLog('matchStart: 尝试开始录制 fid=' + (data.fid || 'null') + ' map=' + (data.map || ''));
         const rc = config.get();
-        replayRecorder.start({ fid: data.fid, map: data.map, quality: rc.replayQuality, fps: rc.replayFps, bitrateMbps: rc.replayBitrateMbps, audio: rc.replayAudio, displayId: rc.replayDisplayId || '' }).then((r) => {
+        replayRecorder.start({ fid: data.fid, map: data.map, quality: rc.replayQuality, fps: rc.replayFps, bitrateMbps: rc.replayBitrateMbps, audio: rc.replayAudio, displayId: rc.replayDisplayId || '', saveDir: localReplaysDir() }).then((r) => {
           if (!r.ok) { console.error('[replay] 启动录制失败: ' + (r.message || '')); replayLog('start fail: ' + (r.message || '')); }
           else replayLog('start ok, source=' + (replayRecorder.current ? replayRecorder.current.sourceId : '?'));
         }).catch((e) => { replayLog('start throw: ' + String((e && e.message) || e)); });
@@ -685,6 +691,7 @@ async function buildProfile(pid) {
     latestElo: null,
     latestEloMatch: null,
     recentMatches: [],
+    recentError: null, // 最近 10 局拉取失败原因（界面提示用）
     info: null
   };
   for (const e of out.encounters) {
@@ -695,30 +702,8 @@ async function buildProfile(pid) {
   try {
     const res = await client.playerMatchesRecent(id, 10);
     const list = (res && Array.isArray(res.matches)) ? res.matches : [];
-    const recent = [];
-    for (const raw of list) {
-      const d = (raw && raw.data) || {};
-      const data = (d.Data && typeof d.Data === 'object') ? d.Data : {};
-      const me = data[id] || Object.values(data).find((x) => String(x.Id) === String(id));
-      if (!me) continue;
-      const oldR = typeof me.OldRating === 'number' ? me.OldRating : null;
-      const newR = typeof me.NewRating === 'number' ? me.NewRating : null;
-      const hasRating = oldR != null && newR != null;
-      let won = null;
-      if (hasRating) { if (newR > oldR) won = true; else if (newR < oldR) won = false; }
-      const meTid = me.TeamId === 1 ? 1 : (me.TeamId === 100 ? null : 0); // 缺失 TeamId = 队伍A(0)
-      if (won == null && d.WinnerTeam != null && meTid != null) won = (meTid === d.WinnerTeam);
-      const mapId = d.MapId != null ? d.MapId : null;
-      recent.push({
-        fid: String(raw.matchId || ''),
-        map: mapId != null ? mapName(mapId) : '',
-        endTime: d.EndTime ? d.EndTime * 1000 : null,
-        eloDelta: hasRating ? Math.round((newR - oldR) * 10) / 10 : null,
-        won,
-        teamId: meTid,
-        custom: !hasRating
-      });
-    }
+    // 解析最近 10 局（Data 对象/字符串都支持，纯函数便于单测）
+    const recent = recentMatchesFromApi(list, id, mapName);
     out.recentMatches = recent;
     // 自定义/未知局补胜负：占点数推导（24h 缓存、不计配额）
     for (const m of out.recentMatches) {
@@ -729,18 +714,15 @@ async function buildProfile(pid) {
         if (wt != null) m.won = (m.teamId === wt);
       } catch (e2) {}
     }
-    for (const raw of list) {
-      const d = (raw && raw.data) || {};
-      const data = (d.Data && typeof d.Data === 'object') ? d.Data : {};
-      const me = data[id] || Object.values(data).find((x) => String(x.Id) === String(id));
-      if (me && typeof me.NewRating === 'number') {
-        out.latestElo = Math.round(me.NewRating * 100) / 100;
-        const mapId = d.MapId != null ? d.MapId : null;
-        out.latestEloMatch = { fid: String(raw.matchId || ''), map: mapId != null ? mapName(mapId) : '', endTime: d.EndTime ? d.EndTime * 1000 : null };
-        break;
-      }
+    // 最新 ELO：取最近一场带 NewRating 的
+    const eloHit = recent.find((m) => m.newRating != null);
+    if (eloHit) {
+      out.latestElo = Math.round(eloHit.newRating * 100) / 100;
+      out.latestEloMatch = { fid: eloHit.fid, map: eloHit.map, endTime: eloHit.endTime };
     }
-  } catch (e) {}
+  } catch (e) {
+    out.recentError = String((e && e.message) || e);
+  }
   // 仍未知胜负的相遇（最多 5 场，最近优先）：拉 analysis/match 用占点数推导并持久化
   const pending = out.encounters.filter((e) => e.won == null && e.fid && /^\d+$/.test(e.fid));
   for (const e of pending.slice(0, 5)) {
@@ -819,19 +801,11 @@ async function checkVersion() {
       url: meta.exeUrl || UPDATE_EXE_URL
     };
     send('version', versionInfo);
-    // Eero 专属 bypass：update-meta 带 bypassUA 时设 User-Agent + 快速间隔（300ms）；否则 1200ms（避开 1 req/s 限流）
+    // EdgeOne 人机验证上线后：任何自定义 User-Agent 都会被判定为机器人而触发验证页（实测锁定），
+    // 旧「Eero 专属 bypass UA」方案已失效且有害，不再应用；统一保持全局 1200ms 请求间隔。
     let bypassState = { enabled: false, ua: '', delayMs: 1200 };
-    try {
-      const ua = String(meta.bypassUA || '').trim();
-      if (ua && client) {
-        client.extraHeaders = Object.assign({}, client.extraHeaders || {}, { 'User-Agent': ua });
-        client.delayMs = 300;
-        bypassState = { enabled: true, ua, delayMs: 300 };
-      } else if (client) {
-        client.delayMs = 1200;
-      }
-    } catch (e) {}
-    send('bypass:state', bypassState); // 通知渲染层（设置里开发者区隐秘显示）
+    try { if (client) client.delayMs = 1200; } catch (e) {}
+    send('bypass:state', bypassState); // 通知渲染层（设置里开发者区隐秘显示，恒为关闭）
     // 公告：每次启动弹一次
     if (versionInfo.announcement) send('announcement', { text: versionInfo.announcement, version: versionInfo.latest });
   } catch (e) { /* 离线/失败静默，不打扰使用 */ }
@@ -996,7 +970,31 @@ function registerIpc() {
       return { ok: false, message: '刷新失败：' + String(err && err.message || err) };
     }
   });
+  // 手动收录对局 ID（对局档案 → 输入对局ID → 拉取 /api/match 写入追踪库）
+  ipcMain.handle('tracker:addMatch', async (e, fid) => {
+    if (!tracker || !client) return { ok: false, message: '未初始化' };
+    const id = String(fid == null ? '' : fid).trim();
+    if (!/^\d+$/.test(id)) return { ok: false, message: '对局 ID 必须是纯数字' };
+    try {
+      const mres = await client.matchById(id).catch(() => null);
+      const mi = mres && mres.matchInfo ? mres.matchInfo : null;
+      if (!mi) return { ok: false, message: 'BATrace 未找到该对局（可能不存在或尚未收录）' };
+      const rec = tracker.fillMatchFromMatchInfo(id, mi);
+      if (!rec) return { ok: false, message: '收录失败' };
+      send('matches:changed', { list: matchSummary() }); // 对局档案即时刷新
+      return { ok: true, fid: id, message: '已收录对局 ' + id, detail: matchDetail(id) };
+    } catch (err) {
+      return { ok: false, message: '收录失败：' + String(err && err.message || err) };
+    }
+  });
   ipcMain.handle('tracker:listAccounts', () => ({ list: tracker ? tracker.listAccounts() : [] }));
+  // 删除单场对局记录（对局档案右键删除）
+  ipcMain.handle('tracker:deleteMatch', (e, fid) => {
+    if (!tracker || fid == null) return { ok: false, message: '参数无效' };
+    const ok = tracker.deleteMatch(String(fid));
+    send('matches:changed', { list: matchSummary() });
+    return { ok, message: ok ? '已删除对局 ' + String(fid) : '未找到该对局' };
+  });
   ipcMain.handle('tracker:deleteAccount', (e, id) => {
     if (!tracker || id == null) return { ok: false, message: '参数无效' };
     const r = tracker.deleteAccount(String(id));
@@ -1034,11 +1032,21 @@ function registerIpc() {
 
   // ---- 对局录像（IPC） ----
   // 录制窗口交回 WebM：只落盘本地（无云端上传；对局ID可用时按编码名命名，便于解析）
+  // 录制窗口分片写盘：每 1 秒一个 chunk，边收边追加，避免几 GB 录像整段进内存/IPC（修复大文件无法录制）
+  ipcMain.on('replay:recorder:chunk', (e, chunk) => {
+    if (!replayRecorder || !replayRecorder.partPath || !chunk || !chunk.byteLength) return;
+    try { fs.appendFileSync(replayRecorder.partPath, Buffer.from(chunk)); } catch (err) { replayLog('chunk 写入失败: ' + String(err && err.message || err)); }
+  });
   ipcMain.handle('replay:recorder:save', async (e, payload) => {
     if (!replayRecorder) return { ok: false, message: '未初始化' };
     try {
+      // 分片录制：先接管分片文件再关窗（避免 closeWindow 把分片删掉）
+      const partPath = replayRecorder.partPath || null;
+      replayRecorder.partPath = null;
       replayRecorder.closeWindow(); // 无论成败都先关录制窗
-      if (!payload || !payload.ok || !payload.data || !payload.data.byteLength) {
+      const hasPart = !!partPath && (() => { try { return fs.statSync(partPath).size > 0; } catch (e) { return false; } })();
+      const hasData = !!(payload && payload.ok && payload.data && payload.data.byteLength);
+      if (!hasPart && !hasData) {
         const err = (payload && payload.error) || '无录制数据';
         replayLog('save fail: ' + err);
         const hint = '常见原因：游戏以「管理员身份」运行而本工具不是（WGC 抓不到高权限窗口）。请以管理员身份运行本工具再试。';
@@ -1046,18 +1054,37 @@ function registerIpc() {
         send('replay:recording', { active: false, error: err + '。' + hint });
         return { ok: false, message: err + '。' + hint };
       }
-      // 补 WebM Duration（MediaRecorder 不写，播放器时长=Infinity → 进度条/拖动失效）；失败则原样保存
-      const webmBuf = patchWebmDuration(Buffer.from(payload.data), payload.durationSec);
-      const fid = String(payload.fid || '');
+      const fid = String((payload && payload.fid) || '');
       const dir = localReplaysDir();
       fs.mkdirSync(dir, { recursive: true });
-      if (payload.testMode) {
+      let finalBuf = null;
+      let tmpFinal = null;
+      // 大文件走分片路径：只读头部补 Duration，其余流式复制（不整段进内存）；兼容旧整段路径
+      if (hasPart) {
+        tmpFinal = path.join(dir, '.rec-final-' + Date.now() + '.webm');
+        const ok = await patchWebmDurationFile(partPath, tmpFinal, payload && payload.durationSec);
+        try { if (fs.existsSync(partPath)) fs.unlinkSync(partPath); } catch (e3) {}
+        if (!ok || !fs.existsSync(tmpFinal) || fs.statSync(tmpFinal).size <= 0) {
+          try { if (tmpFinal && fs.existsSync(tmpFinal)) fs.unlinkSync(tmpFinal); } catch (e3) {}
+          return { ok: false, message: '录像落盘失败（文件过大或磁盘空间不足）' };
+        }
+      } else {
+        // 补 WebM Duration（MediaRecorder 不写，播放器时长=Infinity → 进度条/拖动失效）；失败则原样保存
+        finalBuf = patchWebmDuration(Buffer.from(payload.data), payload.durationSec);
+      }
+      const moveTo = (dest) => {
+        if (tmpFinal) { fs.renameSync(tmpFinal, dest); }
+        else { fs.writeFileSync(dest, finalBuf); }
+      };
+      if (payload && payload.testMode) {
         // 测试录像：随机负数 ID 命名，便于列表解析且绝不会被误当作真实对局
         const tName = encodeReplayKey({ fid: String(payload.fid || '0'), uploaderId: String(payload.uploaderId || '0'), uploaderName: '[测试]', teamId: 0, mapId: 0, ts: Date.now() }).split('/').pop();
-        fs.writeFileSync(path.join(dir, tName), webmBuf);
-        replayLog('testRecord: 已保存 ' + tName + ' (' + webmBuf.length + 'B)');
+        const dest = path.join(dir, tName);
+        moveTo(dest);
+        const sz = fs.statSync(dest).size;
+        replayLog('testRecord: 已保存 ' + tName + ' (' + sz + 'B)');
         send('replay:changed', null);
-        send('replay:testResult', { ok: true, file: tName, size: webmBuf.length });
+        send('replay:testResult', { ok: true, file: tName, size: sz });
         return { ok: true, savedLocal: true, message: '测试录制完成，已保存到本地' };
       }
       const meta = uploaderMetaFor(fid, tracker);
@@ -1067,9 +1094,11 @@ function registerIpc() {
       } else {
         filename = 'nofid_' + Date.now() + '.webm';
       }
-      fs.writeFileSync(path.join(dir, filename), webmBuf);
+      const dest = path.join(dir, filename);
+      moveTo(dest);
+      const sz = fs.statSync(dest).size;
       send('replay:changed', null);
-      replayLog('save: 已保存 ' + filename + ' (' + webmBuf.length + 'B' + (payload.hasAudio ? ', 含声音' : ', 纯画面') + ')');
+      replayLog('save: 已保存 ' + filename + ' (' + sz + 'B' + (payload && payload.hasAudio ? ', 含声音' : ', 纯画面') + ')');
       try { if (Notification.isSupported()) new Notification({ title: '行车记录仪', body: '本局录像已保存到本地' }).show(); } catch (e3) {}
       return { ok: true, message: '已保存到本地' };
     } catch (err) {
@@ -1166,7 +1195,7 @@ function registerIpc() {
     const tFid = r5();
     const tUid = r5();
     const rc = config.get();
-    const r = await replayRecorder.start({ fid: tFid, map: '录制测试', quality: rc.replayQuality, fps: rc.replayFps, bitrateMbps: rc.replayBitrateMbps, audio: rc.replayAudio, testMode: true, testUploaderId: tUid, displayId: rc.replayDisplayId || '' });
+    const r = await replayRecorder.start({ fid: tFid, map: '录制测试', quality: rc.replayQuality, fps: rc.replayFps, bitrateMbps: rc.replayBitrateMbps, audio: rc.replayAudio, testMode: true, testUploaderId: tUid, displayId: rc.replayDisplayId || '', saveDir: localReplaysDir() });
     replayLog('testRecord: fid=' + tFid + ' uploaderId=' + tUid);
     if (!r.ok) return { ok: false, message: replayRecorder.lastError || '启动失败' };
     testRecordTimer = setTimeout(() => { testRecordTimer = null; replayLog('testRecord: 60 秒到，停止'); replayRecorder.stop(); }, 60000);

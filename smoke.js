@@ -43,7 +43,15 @@ function registerStubIpc() {
     return { maggotIndex: 3.5, calls: 1, name: 'Zola', stbid: '8863', trend: [], tags: [], units: [], refs: [] };
   });
   handle('match:queryRoster', () => true);
-  handle('tracker:profile', () => ({ id: '0', player: null, stats: {}, encounters: [], nameHistory: [], banned: false, banInfo: null, info: null }));
+  handle('tracker:profile', (e, id) => {
+    if (String(id) === '999') {
+      return { id: '999', player: { id: '999', names: [{ name: 'X' }], firstSeen: 0, lastSeen: 0 }, stats: {}, encounters: [], nameHistory: [], banned: false, banInfo: null, recentMatches: [], recentError: 'BATrace 暂时不可用（测试）', info: null };
+    }
+    return { id: '8863', player: { id: '8863', names: [{ name: 'Zola' }], firstSeen: 0, lastSeen: 0 }, stats: {}, encounters: [], nameHistory: [], banned: false, banInfo: null, recentMatches: [
+      { fid: '8422864', map: 'Baltiisk', endTime: Date.now() - 3600000, eloDelta: 10, won: true, teamId: 1, custom: false },
+      { fid: '8422225', map: 'River', endTime: Date.now() - 7200000, eloDelta: -5, won: false, teamId: 1, custom: false }
+    ], recentError: null, info: null };
+  });
   handle('tracker:getBans', () => ({ list: [], lastSync: 0 }));
   handle('tracker:syncBans', () => ({ list: [], lastSync: 0 }));
   handle('tracker:matches', () => ({
@@ -126,6 +134,9 @@ app.whenReady().then(async () => {
         out.setLogDirValue = document.getElementById('setLogDir').value;
         out.accountListText = (document.getElementById('accountList') || {}).textContent || '';
         out.multiBondChecked = (document.getElementById('setMultiBond') || {}).checked;
+        out.panelOrderListExists = !!document.getElementById('panelOrderList');
+        out.panelOrderRowCount = document.querySelectorAll('#panelOrderList .panel-order-row').length;
+        out.addMatchUiExists = !!document.getElementById('btnAddMatch') && !!document.getElementById('addMatchFid');
         out.apiHealthClass = (document.getElementById('apiHealth') || {}).className;
         out.apiHealthText = (document.getElementById('apiHealth') || {}).textContent;
         out.archiveRows = document.querySelectorAll('.archive-row').length;
@@ -136,6 +147,8 @@ app.whenReady().then(async () => {
         await new Promise((r) => setTimeout(r, 500));
         out.matchHasRadar = !!document.getElementById('matchGame');
         out.mdHeader = (document.querySelector('.md-table thead') || {}).textContent || '';
+        out.mdEloCell = (document.querySelectorAll('.md-table tbody tr td')[2] || {}).textContent || '';
+        out.mdEloShowsValue = out.mdEloCell.trim().length > 0 && out.mdEloCell.indexOf('(') >= 0;
         out.mdHasSupply = (document.querySelector('.md-table thead') || {}).textContent.indexOf('补给') >= 0;
         out.mdLayout = (function () {
           const tbl = document.querySelector('.md-table');
@@ -156,6 +169,17 @@ app.whenReady().then(async () => {
         out.ctxText = (document.getElementById('ctxMenu') || {}).textContent || '';
         document.dispatchEvent(new MouseEvent('click'));
         document.getElementById('btnMatchClose').click();
+        // 调查弹窗：最近 10 局渲染 + 失败提示
+        openInvestigate('8863', 'Zola');
+        await new Promise((r) => setTimeout(r, 400));
+        out.invRecentCount = document.querySelectorAll('#invRecent .inv-item').length;
+        out.invRecentHasMap = (document.getElementById('invRecent') || {}).textContent.indexOf('Baltiisk') >= 0;
+        document.getElementById('btnInvClose').click();
+        openInvestigate('999', 'X');
+        await new Promise((r) => setTimeout(r, 400));
+        out.invRecentErrorText = (document.getElementById('invRecent') || {}).textContent || '';
+        out.invRecentErrorShown = out.invRecentErrorText.indexOf('最近 10 局加载失败') >= 0;
+        document.getElementById('btnInvClose').click();
         // 点卡组刷新
         const before = document.getElementById('deckFront').options.length;
         document.getElementById('btnDeckRefresh').click();
@@ -163,6 +187,7 @@ app.whenReady().then(async () => {
         out.deckFrontCount = document.getElementById('deckFront').options.length;
         out.deckPathsText = (document.getElementById('deckPaths') || {}).textContent || '';
         out.deckMsg = (document.getElementById('deckMsg') || {}).textContent || '';
+        out.deckToggleExists = !!document.getElementById('btnDeckToggle');
         // 行车记录仪卡片（常驻，开关只控制自动录制；列表按时间倒序管理）
         out.replayCardExists = !!document.getElementById('replayCard');
         out.replayCardHidden = (document.getElementById('replayCard') || {}).classList.contains('hidden');

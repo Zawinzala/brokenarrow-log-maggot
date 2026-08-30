@@ -5,7 +5,6 @@
 const fs = require('fs');
 const path = require('path');
 
-const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36';
 
 const PROBES = [
   { path: '/api/players/search?q=test&limit=1', label: '搜索' },
@@ -15,10 +14,12 @@ const PROBES = [
 ];
 
 class ApiHealth {
-  constructor({ base = 'https://app.batrace.top', file = '', timeoutMs = 8000 } = {}) {
+  constructor(opts = {}) {
+    const { base = 'https://app.batrace.top', file = '', timeoutMs = 8000 } = opts;
     this.base = String(base || '').replace(/\/+$/, '');
     this.file = file;
     this.timeoutMs = timeoutMs || 8000;
+    this.fetchImpl = typeof opts.fetchImpl === 'function' ? opts.fetchImpl : null; // 自定义请求实现（Electron net.fetch，带 session cookie）
     this.healthCalls = 0;
     this.last = null; // { state:'ok'|'partial'|'down', checks:[{path,label,ok,ms,status,err}], at, okCount, total }
     this._load();
@@ -47,12 +48,16 @@ class ApiHealth {
       const t0 = Date.now();
       let ok = false, status = 0, err = '';
       try {
-        const res = await fetch(this.base + p.path, {
-          headers: { 'User-Agent': UA, Accept: 'application/json' },
+        const res = await (this.fetchImpl || fetch)(this.base + p.path, {
+          // 不发送自定义 UA：EdgeOne 会把自定义 UA 当机器人（实测锁定），探针与真实请求保持一致
+          headers: { Accept: 'application/json' },
           signal: AbortSignal.timeout(this.timeoutMs)
         });
         status = res.status;
-        ok = res.ok;
+        // 人机验证页返回 HTTP 200 但内容是 HTML：按不可用计，稳定性灯才准确
+        const ctype = String((res.headers && typeof res.headers.get === 'function' ? res.headers.get('content-type') : '') || '');
+        ok = res.ok && !ctype.toLowerCase().includes('text/html');
+        if (res.ok && !ok) err = '人机验证未完成';
       } catch (e) {
         err = String((e && e.message) || e).slice(0, 60);
       }

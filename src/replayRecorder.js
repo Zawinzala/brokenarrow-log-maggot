@@ -3,6 +3,7 @@
 // 每 5 秒把当前画面画到 720p canvas，captureStream(1) + MediaRecorder 产出 1fps WebM；
 // 对局结束由主进程发 stop，页面把 Blob 经 IPC 交回主进程落盘并入上传队列。
 const path = require('path');
+const fs = require('fs');
 
 let electronMod = null;
 try { electronMod = require('electron'); } catch (e) { electronMod = null; }
@@ -86,13 +87,14 @@ class ReplayRecorder {
     this.current = null;
     this.lastError = null;
     this._forceTimer = null;
+    this.partPath = null; // 录制分片临时文件（主进程边收边写，避免大文件整段进内存）
   }
 
   status() {
     return { active: this.active, current: this.current ? { fid: this.current.fid, map: this.current.map, startedAt: this.current.startedAt, sourceId: this.current.sourceId || '' } : null };
   }
 
-  async start({ fid, map, quality, fps, bitrateMbps, audio, testMode, testUploaderId, displayId }) {
+  async start({ fid, map, quality, fps, bitrateMbps, audio, testMode, testUploaderId, displayId, saveDir }) {
     this.abort();
     const desktopCapturer = electronMod && electronMod.desktopCapturer;
     const BrowserWindow = electronMod && electronMod.BrowserWindow;
@@ -128,6 +130,12 @@ class ReplayRecorder {
       win.webContents.on('did-fail-load', (e, code, desc) => this._error('录制窗口加载失败: ' + code + ' ' + String(desc || '').slice(0, 200)));
       win.webContents.on('render-process-gone', (e, d) => this._error('录制窗口进程退出: ' + ((d && d.reason) || 'unknown')));
       win.on('closed', () => { if (this.win === win) this.win = null; });
+      // 本局录制分片临时文件（主进程 replay:recorder:chunk 边收边写）
+      try {
+        if (this.partPath && fs.existsSync(this.partPath)) fs.unlinkSync(this.partPath);
+      } catch (e) {}
+      const partDir = String(saveDir || '').trim();
+      this.partPath = path.join(partDir || require('os').tmpdir(), '.rec-part-' + Date.now() + '-' + String(fid != null ? fid : 'nofid') + '.webm');
       await win.loadFile(path.join(__dirname, '..', 'renderer', 'replayRecorder.html'));
       this.win = win;
       this.active = true;
@@ -173,10 +181,15 @@ class ReplayRecorder {
       setTimeout(() => { try { w.destroy(); } catch (e) {} }, 2000);
     }
     if (this._forceTimer) { clearTimeout(this._forceTimer); this._forceTimer = null; }
+    this._deletePart();
     this.win = null;
     this.active = false;
     this.current = null;
     this._emitStatus();
+  }
+
+  _deletePart() {
+    if (this.partPath) { try { if (fs.existsSync(this.partPath)) fs.unlinkSync(this.partPath); } catch (e) {} this.partPath = null; }
   }
 
   closeWindow() {
@@ -184,6 +197,7 @@ class ReplayRecorder {
     if (this.win) { try { this.win.destroy(); } catch (e) {} this.win = null; }
     this.active = false;
     this.current = null;
+    this._deletePart();
     this._emitStatus();
   }
 

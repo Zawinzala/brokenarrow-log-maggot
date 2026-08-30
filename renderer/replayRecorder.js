@@ -1,6 +1,6 @@
 // 录制窗口逻辑：抓桌面流（视频 + 可选系统声音）→ 按设定帧率抽帧画到 canvas → captureStream(fps) + MediaRecorder 产出 WebM
 // 画布尺寸用 rec.computeCanvasSize（单一来源，来自 src/replayRecorder.js），绝不硬编码分辨率；
-// 主进程发 stop 后把 Blob 转 ArrayBuffer 交回主进程落盘
+// 主进程发 stop 后收尾；录制过程中每个 1s 分片实时发主进程写盘（避免几 GB 录像整段进内存/IPC）
 (async () => {
   const rec = window.rec;
   const cfg = rec.getConfig() || {};
@@ -10,6 +10,7 @@
   let previewTimer = null;
   let frameCount = 0;
   let discarded = false;
+  let chunkQueue = Promise.resolve(); // 分片发送队列：保证 stop 前所有分片已发给主进程
   let finalFid = cfg.fid || '';
   let finalMap = cfg.map || '';
   const video = document.getElementById('v');
@@ -85,15 +86,18 @@
         try { cstream.addTrack(stream.getAudioTracks()[0]); hasAudio = cstream.getAudioTracks().length > 0; } catch (e) {}
       }
       mr = new MediaRecorder(cstream, { mimeType: mime, videoBitsPerSecond: VIDEO_BPS, audioBitsPerSecond: 128000 });
-      const chunks = [];
-      mr.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+      const sendChunk = (blob) => {
+        const p = blob.arrayBuffer().then((ab) => { try { rec.chunk(ab); } catch (e) {} }).catch(() => {});
+        chunkQueue = chunkQueue.then(() => p);
+      };
+      mr.ondataavailable = (e) => { if (e.data && e.data.size) sendChunk(e.data); };
       mr.onstop = async () => {
         if (discarded) return; // 丢弃时只清理，不交回数据
         try { if (stream) stream.getTracks().forEach((t) => t.stop()); } catch (e) {}
-        const blob = new Blob(chunks, { type: mime });
-        const buf = await blob.arrayBuffer();
+        // 等所有分片发送完毕再 save：主进程先收齐分片、再统一落盘（顺序保证不丢尾帧）
+        try { await chunkQueue; } catch (e) {}
         try {
-          await rec.save({ ok: true, fid: finalFid, map: finalMap, mime, data: buf, frames: frameCount, durationSec: Math.round(frameCount / fps), hasAudio, testMode: !!(cfg.testMode), uploaderId: (cfg && cfg.testUploaderId) || '' });
+          await rec.save({ ok: true, fid: finalFid, map: finalMap, mime, chunked: true, frames: frameCount, durationSec: Math.round(frameCount / fps), hasAudio, testMode: !!(cfg.testMode), uploaderId: (cfg && cfg.testUploaderId) || '' });
         } catch (e) { fail('save fail ' + String(e)); }
       };
       mr.start(1000);
